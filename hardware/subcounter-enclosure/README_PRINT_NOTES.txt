@@ -4,7 +4,8 @@ Fits ONE FC-16 (MAX7219) 4-in-1 LED matrix module  (32x8 display,
 ~128 mm of LEDs).  ESP32 mounts inside on the rear cover.  The box
 hangs on two wall screws via built-in keyhole slots.
 
-OUTSIDE SIZE (approx):  149 x 37 x 40 mm  (L x H x depth)
+OUTSIDE SIZE (approx):  149 x 37 x 44 mm  (L x H x depth = 1.73 in)
+INTERIOR CLEAR DEPTH:   ~39 mm (1.54 in) behind the grille face
 
 WHAT TO PRINT & HOW MANY
 ------------------------

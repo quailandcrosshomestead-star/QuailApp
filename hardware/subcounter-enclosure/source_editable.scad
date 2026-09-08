@@ -47,7 +47,9 @@ grid_shift_y = 0;
 clearance      = 0.4;
 wall           = 2.0;
 end_frame      = 8.0;   // solid frame at each END (anchors cover screws)
-controller_gap = 22;    // depth behind the board for the ESP32
+controller_gap = 26;    // depth behind the board for the ESP32
+                        // (board_thick+controller_gap = interior clear depth;
+                        //  13+26 = 39 mm >= 1.5 in behind the grille)
 back_t         = 3.0;
 corner_r       = 3.0;
 
