@@ -31,7 +31,7 @@
 </head>
 <body>
 <div id="wrap"><canvas id="game"></canvas></div>
-<div id="hint">← → move &nbsp;·&nbsp; SPACE fire &nbsp;·&nbsp; P pause &nbsp;·&nbsp; touch: drag to move, tap to fire</div>
+<div id="hint">← → move &nbsp;·&nbsp; SPACE fire &nbsp;·&nbsp; P pause &nbsp;·&nbsp; touch: drag to steer &amp; auto-fire</div>
 <script>
 (() => {
   "use strict";
@@ -111,8 +111,9 @@
   });
   addEventListener("keyup", e => { keys[e.key] = false; });
 
-  // Touch: drag to move, tap to fire.
+  // Touch: drag to steer, auto-fire while a finger is down.
   let touchX = null;
+  let touchFiring = false;
   function canvasX(clientX) {
     const r = canvas.getBoundingClientRect();
     return (clientX - r.left) / r.width * W;
@@ -122,13 +123,15 @@
     Sound.resume();
     if (state === "title" || state === "over") { startGame(); return; }
     touchX = canvasX(e.touches[0].clientX);
-    firePressed = true;
+    touchFiring = true;
   }, { passive: false });
   canvas.addEventListener("touchmove", e => {
     e.preventDefault();
     touchX = canvasX(e.touches[0].clientX);
+    touchFiring = true;
   }, { passive: false });
-  canvas.addEventListener("touchend", e => { e.preventDefault(); touchX = null; }, { passive: false });
+  canvas.addEventListener("touchend", e => { e.preventDefault(); touchX = null; touchFiring = false; }, { passive: false });
+  canvas.addEventListener("touchcancel", e => { e.preventDefault(); touchX = null; touchFiring = false; }, { passive: false });
 
   // ----- Game state -----
   let state = "title"; // title | play | over | paused
@@ -303,7 +306,7 @@
     player.x = Math.max(half, Math.min(W - half, player.x));
 
     // --- Firing (power-ups modify it) ---
-    const wantFire = keys[" "] || firePressed;
+    const wantFire = keys[" "] || firePressed || touchFiring;
     if (wantFire && player.cool <= 0) {
       const guns = player.dual ? [player.x - 14, player.x + 14] : [player.x];
       for (const gx of guns) {
@@ -653,7 +656,7 @@
         { t: "shoot one holding your ship to fly a DUAL FIGHTER!", small: true, color: "#9be36b" },
         { t: "", small: true },
         { t: "← →  MOVE    SPACE  FIRE    P  PAUSE", color: "#eaf2ff" },
-        { t: "", small: true },
+        { t: "On touch: drag to steer — fire is automatic", small: true, color: "#9fb0d6" },
         { t: "PRESS ANY KEY / TAP TO START", color: "#9be36b" },
         { t: high > 0 ? "HIGH SCORE  " + high : "", small: true, color: "#ffd36b" },
       ]);
