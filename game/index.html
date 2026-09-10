@@ -146,7 +146,7 @@
   let high = +(localStorage.getItem("starSquadronHigh") || 0);
 
   const player = { x: W/2, y: H - 60, w: 34, h: 30, cool: 0, invuln: 0,
-                   dual: false, shield: 0, spread: 0, rapid: 0 };
+                   dual: false, shield: 0, spread: 0, rapid: 0, pierce: 0, mult: 0 };
   let bullets = [];      // player shots
   let enemyBullets = []; // alien shots
   let enemies = [];
@@ -204,6 +204,7 @@
     bullets = []; enemyBullets = []; particles = []; powerups = []; freeShip = null;
     player.x = W/2; player.y = H - 60; player.invuln = 90; player.cool = 0;
     player.dual = false; player.shield = 0; player.spread = 0; player.rapid = 0;
+    player.pierce = 0; player.mult = 0;
     spawnWave(wave);
     state = "play";
   }
@@ -240,6 +241,9 @@
     { k: "spread", w: 3, color: "#ffd36b", label: "S" },
     { k: "rapid",  w: 3, color: "#7fd0ff", label: "R" },
     { k: "shield", w: 3, color: "#9be36b", label: "O" },
+    { k: "pierce", w: 2, color: "#d9b3ff", label: "P" },
+    { k: "x2",     w: 2, color: "#ffe08a", label: "x2" },
+    { k: "bomb",   w: 2, color: "#ff7a3a", label: "B" },
     { k: "1up",    w: 1, color: "#ff8fbf", label: "1" }
   ];
   function dropPowerup(x, y) {
@@ -254,7 +258,24 @@
     if (pu.kind === "spread") { player.spread = 10; floatText(player.x, player.y-20, "SPREAD", "#ffd36b"); }
     else if (pu.kind === "rapid") { player.rapid = 10; floatText(player.x, player.y-20, "RAPID", "#7fd0ff"); }
     else if (pu.kind === "shield") { player.shield = 8; floatText(player.x, player.y-20, "SHIELD", "#9be36b"); }
+    else if (pu.kind === "pierce") { player.pierce = 9; floatText(player.x, player.y-20, "PIERCE", "#d9b3ff"); }
+    else if (pu.kind === "x2") { player.mult = 12; floatText(player.x, player.y-20, "DOUBLE SCORE", "#ffe08a"); }
     else if (pu.kind === "1up") { lives++; floatText(player.x, player.y-20, "1UP", "#ff8fbf"); }
+    else if (pu.kind === "bomb") {
+      enemyBullets = [];
+      let killed = 0;
+      for (const e of enemies) {
+        if (e.state === "dive") {
+          if (e.holding) rescue(e);
+          boom(e.x, e.y, "#ffcf5a", 14); e.hp = 0; killed++;
+        }
+      }
+      enemies = enemies.filter(e => e.hp > 0);
+      addScore(killed * 100 * (player.mult > 0 ? 2 : 1));
+      boom(player.x, player.y, "#ff7a3a", 44);
+      Sound.explode();
+      floatText(player.x, player.y-24, "SMART BOMB!", "#ff7a3a");
+    }
   }
 
   // ----- Capture & rescue -----
@@ -302,6 +323,8 @@
     player.shield = Math.max(0, player.shield - dt);
     player.spread = Math.max(0, player.spread - dt);
     player.rapid  = Math.max(0, player.rapid  - dt);
+    player.pierce = Math.max(0, player.pierce - dt);
+    player.mult   = Math.max(0, player.mult   - dt);
 
     // --- Player movement (full 2D) ---
     let mvx = 0, mvy = 0;
@@ -321,13 +344,14 @@
     const wantFire = keys[" "] || firePressed || touchFiring;
     if (wantFire && player.cool <= 0) {
       const guns = player.dual ? [player.x - 14, player.x + 14] : [player.x];
+      const pierce = player.pierce > 0;
       for (const gx of guns) {
         if (player.spread > 0) {
-          bullets.push({ x: gx, y: player.y - 18, w: 4, h: 14, vy: -540, vx: 0 });
-          bullets.push({ x: gx, y: player.y - 14, w: 4, h: 14, vy: -500, vx: -180 });
-          bullets.push({ x: gx, y: player.y - 14, w: 4, h: 14, vy: -500, vx: 180 });
+          bullets.push({ x: gx, y: player.y - 18, w: 4, h: 14, vy: -540, vx: 0, pierce });
+          bullets.push({ x: gx, y: player.y - 14, w: 4, h: 14, vy: -500, vx: -180, pierce });
+          bullets.push({ x: gx, y: player.y - 14, w: 4, h: 14, vy: -500, vx: 180, pierce });
         } else {
-          bullets.push({ x: gx, y: player.y - 18, w: 4, h: 14, vy: -560, vx: 0, home: true });
+          bullets.push({ x: gx, y: player.y - 18, w: 4, h: 14, vy: -560, vx: 0, home: true, pierce });
         }
       }
       player.cool = player.rapid > 0 ? 0.12 : 0.28;
@@ -448,27 +472,28 @@
       }
     }
 
-    // --- Player bullets vs enemies ---
+    // --- Player bullets vs enemies (pierce shots pass through) ---
     for (const b of bullets) {
       for (const e of enemies) {
-        if (e.hp > 0 && rectHit(b, { x: e.x, y: e.y, w: e.isBoss ? 34 : 30, h: 26 })) {
-          b.y = -999;
-          e.hp--;
-          Sound.hit();
-          const col = e.tier === 3 ? "#6bffa0" : e.tier === 2 ? "#ff6b6b" : e.tier === 1 ? "#c77bff" : "#5ad1ff";
-          boom(e.x, e.y, col, 6);
-          if (e.hp <= 0) {
-            if (e.holding) rescue(e);
-            const base = (e.isBoss ? 200 : (e.tier + 1) * 50);
-            const pts = base * (e.state === "dive" ? 2 : 1);
-            addScore(pts);
-            boom(e.x, e.y, "#ffcf5a", 18);
-            Sound.explode();
-            floatText(e.x, e.y, "+" + pts, "#fff");
-            if (Math.random() < (e.isBoss ? 0.5 : 0.12)) dropPowerup(e.x, e.y);
-          }
-          break;
+        if (e.hp <= 0) continue;
+        if (b.pierce && b.hits && b.hits.has(e)) continue; // don't re-hit the same target
+        if (!rectHit(b, { x: e.x, y: e.y, w: e.isBoss ? 34 : 30, h: 26 })) continue;
+        if (b.pierce) { (b.hits || (b.hits = new Set())).add(e); } else { b.y = -999; }
+        e.hp--;
+        Sound.hit();
+        const col = e.tier === 3 ? "#6bffa0" : e.tier === 2 ? "#ff6b6b" : e.tier === 1 ? "#c77bff" : "#5ad1ff";
+        boom(e.x, e.y, col, 6);
+        if (e.hp <= 0) {
+          if (e.holding) rescue(e);
+          const base = (e.isBoss ? 200 : (e.tier + 1) * 50);
+          const pts = base * (e.state === "dive" ? 2 : 1) * (player.mult > 0 ? 2 : 1);
+          addScore(pts);
+          boom(e.x, e.y, "#ffcf5a", 18);
+          Sound.explode();
+          floatText(e.x, e.y, "+" + pts, "#fff");
+          if (Math.random() < (e.isBoss ? 0.3 : 0.07)) dropPowerup(e.x, e.y);
         }
+        if (!b.pierce) break;
       }
     }
     enemies = enemies.filter(e => e.hp > 0);
@@ -618,7 +643,7 @@
     ctx.fillRect(-10, -10, 20, 20);
     ctx.globalAlpha = 1;
     ctx.fillStyle = "#0a0c18";
-    ctx.font = "bold 14px 'Courier New', monospace";
+    ctx.font = "bold " + (pu.label.length > 1 ? 11 : 14) + "px 'Courier New', monospace";
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
     ctx.fillText(pu.label, 0, 1);
     ctx.textBaseline = "alphabetic";
@@ -646,6 +671,8 @@
     if (player.spread > 0) active.push(["SPREAD", player.spread, "#ffd36b"]);
     if (player.rapid  > 0) active.push(["RAPID",  player.rapid,  "#7fd0ff"]);
     if (player.shield > 0) active.push(["SHIELD", player.shield, "#9be36b"]);
+    if (player.pierce > 0) active.push(["PIERCE", player.pierce, "#d9b3ff"]);
+    if (player.mult   > 0) active.push(["x2 SCORE", player.mult, "#ffe08a"]);
     ctx.textAlign = "left"; ctx.font = "11px 'Courier New', monospace";
     active.forEach((a, i) => {
       const y = 40 + i * 16;
@@ -677,7 +704,8 @@
         { t: "SQUADRON", big: true, color: "#7fd0ff" },
         { t: "", small: true },
         { t: "Hold the line against the alien swarm.", small: true, color: "#9fb0d6" },
-        { t: "Grab power-ups: S spread · R rapid · O shield · 1 up", small: true, color: "#9fb0d6" },
+        { t: "Power-ups: S spread · R rapid · O shield · P pierce", small: true, color: "#9fb0d6" },
+        { t: "x2 score · B smart-bomb · 1 up", small: true, color: "#9fb0d6" },
         { t: "Green bosses beam-capture your ship —", small: true, color: "#9fb0d6" },
         { t: "shoot one holding your ship to fly a DUAL FIGHTER!", small: true, color: "#9be36b" },
         { t: "", small: true },

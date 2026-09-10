@@ -22,11 +22,17 @@ dependencies, no internet required — it's a single HTML file.
 - Classic Galaga-style **formation** of enemies that sways, plus **dive-bombing**
   attackers that swoop toward you (worth 2× points to shoot mid-dive).
 - Three alien tiers plus **green boss aliens** with increasing hit points.
-- **Power-ups** dropped by destroyed aliens — grab them as they fall:
+- **Power-ups** occasionally dropped by destroyed aliens — grab them as they fall:
   - **S — Spread shot:** fire a three-way spread (10s)
   - **R — Rapid fire:** much faster cannon (10s)
   - **O — Shield:** absorb hits without losing a ship (8s)
+  - **P — Pierce:** shots punch through enemies instead of stopping on the first (9s)
+  - **x2 — Double score:** all points doubled (12s)
+  - **B — Smart bomb:** instantly destroys every diving enemy and clears all
+    enemy fire on screen
   - **1 — 1-UP:** an extra life
+- A gentle **auto-aim assist** curves your main cannon toward the nearest enemy,
+  and the ship flies freely in **2D** (arrows / WASD, or drag on touch).
 - **Capture & rescue** (the signature Galaga mechanic): a green boss can dive and
   fire a **tractor beam**. Get caught and it steals a ship and flies it up to the
   formation as bait. **Shoot that boss while it's holding your ship** and the ship
