@@ -1,0 +1,4 @@
+# Lightning Trigger app dependencies.
+# The gphoto2 CLI is a system package, not pip — see README_LIGHTNING.md.
+opencv-python>=4.5
+# Optional: run the detector tests with `pip install pytest && pytest tests/`
