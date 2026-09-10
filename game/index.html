@@ -111,27 +111,34 @@
   });
   addEventListener("keyup", e => { keys[e.key] = false; });
 
-  // Touch: drag to steer, auto-fire while a finger is down.
-  let touchX = null;
+  // Touch: drag anywhere to fly the ship, auto-fire while a finger is down.
+  let touchX = null, touchY = null;
   let touchFiring = false;
+  const TOUCH_LIFT = 44; // draw the ship this far above the fingertip so it stays visible
   function canvasX(clientX) {
     const r = canvas.getBoundingClientRect();
     return (clientX - r.left) / r.width * W;
+  }
+  function canvasY(clientY) {
+    const r = canvas.getBoundingClientRect();
+    return (clientY - r.top) / r.height * H;
   }
   canvas.addEventListener("touchstart", e => {
     e.preventDefault();
     Sound.resume();
     if (state === "title" || state === "over") { startGame(); return; }
     touchX = canvasX(e.touches[0].clientX);
+    touchY = canvasY(e.touches[0].clientY);
     touchFiring = true;
   }, { passive: false });
   canvas.addEventListener("touchmove", e => {
     e.preventDefault();
     touchX = canvasX(e.touches[0].clientX);
+    touchY = canvasY(e.touches[0].clientY);
     touchFiring = true;
   }, { passive: false });
-  canvas.addEventListener("touchend", e => { e.preventDefault(); touchX = null; touchFiring = false; }, { passive: false });
-  canvas.addEventListener("touchcancel", e => { e.preventDefault(); touchX = null; touchFiring = false; }, { passive: false });
+  canvas.addEventListener("touchend", e => { e.preventDefault(); touchX = touchY = null; touchFiring = false; }, { passive: false });
+  canvas.addEventListener("touchcancel", e => { e.preventDefault(); touchX = touchY = null; touchFiring = false; }, { passive: false });
 
   // ----- Game state -----
   let state = "title"; // title | play | over | paused
@@ -195,7 +202,7 @@
   function startGame() {
     score = 0; lives = 3; wave = 1;
     bullets = []; enemyBullets = []; particles = []; powerups = []; freeShip = null;
-    player.x = W/2; player.invuln = 90; player.cool = 0;
+    player.x = W/2; player.y = H - 60; player.invuln = 90; player.cool = 0;
     player.dual = false; player.shield = 0; player.spread = 0; player.rapid = 0;
     spawnWave(wave);
     state = "play";
@@ -265,7 +272,7 @@
       lives--;
       if (lives <= 0) { boss.holding = true; boss.state = "enter"; state = "over"; return; }
       player.invuln = 120;
-      player.x = W/2;
+      player.x = W/2; player.y = H - 60;
     }
     boss.holding = true;
     boss.state = "enter"; // fly the captured ship back up to the formation as bait
@@ -296,14 +303,19 @@
     player.spread = Math.max(0, player.spread - dt);
     player.rapid  = Math.max(0, player.rapid  - dt);
 
-    // --- Player movement ---
-    let mv = 0;
-    if (keys["ArrowLeft"] || keys["a"] || keys["A"]) mv -= 1;
-    if (keys["ArrowRight"] || keys["d"] || keys["D"]) mv += 1;
-    if (mv) player.x += mv * 300 * dt;
+    // --- Player movement (full 2D) ---
+    let mvx = 0, mvy = 0;
+    if (keys["ArrowLeft"]  || keys["a"] || keys["A"]) mvx -= 1;
+    if (keys["ArrowRight"] || keys["d"] || keys["D"]) mvx += 1;
+    if (keys["ArrowUp"]    || keys["w"] || keys["W"]) mvy -= 1;
+    if (keys["ArrowDown"]  || keys["s"] || keys["S"]) mvy += 1;
+    if (mvx) player.x += mvx * 300 * dt;
+    if (mvy) player.y += mvy * 300 * dt;
     if (touchX !== null) player.x += (touchX - player.x) * Math.min(1, dt * 14);
+    if (touchY !== null) player.y += ((touchY - TOUCH_LIFT) - player.y) * Math.min(1, dt * 14);
     const half = player.dual ? 28 : player.w/2;
     player.x = Math.max(half, Math.min(W - half, player.x));
+    player.y = Math.max(70, Math.min(H - 20, player.y));
 
     // --- Firing (power-ups modify it) ---
     const wantFire = keys[" "] || firePressed || touchFiring;
@@ -333,8 +345,8 @@
           if (d < bd) { bd = d; best = e; }
         }
         if (best) {
-          const desired = Math.max(-190, Math.min(190, (best.x - b.x) * 4)); // capped assist
-          b.vx = (b.vx || 0) + (desired - (b.vx || 0)) * Math.min(1, dt * 6);
+          const desired = Math.max(-320, Math.min(320, (best.x - b.x) * 7)); // capped assist
+          b.vx = (b.vx || 0) + (desired - (b.vx || 0)) * Math.min(1, dt * 10);
         }
       }
       b.y += b.vy * dt; b.x += (b.vx || 0) * dt;
@@ -486,7 +498,7 @@
           if (hitBullet) enemyBullets = enemyBullets.filter(b => b !== hitBullet);
           boom(player.x, player.y, "#7fd0ff", 30);
           Sound.player();
-          player.invuln = 120; player.x = W/2;
+          player.invuln = 120; player.x = W/2; player.y = H - 60;
           if (lives <= 0) state = "over";
         }
       }
