@@ -88,6 +88,10 @@
       hit:   () => blip(200, 0.09, "sawtooth", 0.12, 90),
       explode: () => noise(0.35, 0.22),
       dive:  () => blip(500, 0.18, "triangle", 0.06, 180),
+      beam:  () => blip(120, 0.4, "sawtooth", 0.05, 300),
+      capture: () => { blip(300,0.5,"sawtooth",0.15,60); noise(0.4,0.15); },
+      rescue: () => { blip(523,0.09,"square",0.12); setTimeout(()=>blip(784,0.09,"square",0.12),90); setTimeout(()=>blip(1047,0.16,"square",0.12),180); },
+      power: () => { blip(660,0.08,"square",0.1); setTimeout(()=>blip(990,0.1,"square",0.1),80); },
       player:() => { noise(0.5, 0.3); blip(160, 0.5, "sawtooth", 0.15, 40); },
       wave:  () => { blip(523,0.1,"square",0.1); setTimeout(()=>blip(659,0.1,"square",0.1),100); setTimeout(()=>blip(784,0.14,"square",0.1),200); },
       resume: () => ctxNow()
@@ -128,15 +132,17 @@
 
   // ----- Game state -----
   let state = "title"; // title | play | over | paused
-  let prevState = "play";
   let score = 0, lives = 3, wave = 1;
   let high = +(localStorage.getItem("starSquadronHigh") || 0);
 
-  const player = { x: W/2, y: H - 60, w: 34, h: 30, cool: 0, invuln: 0 };
+  const player = { x: W/2, y: H - 60, w: 34, h: 30, cool: 0, invuln: 0,
+                   dual: false, shield: 0, spread: 0, rapid: 0 };
   let bullets = [];      // player shots
   let enemyBullets = []; // alien shots
   let enemies = [];
   let particles = [];
+  let powerups = [];     // falling pickups
+  let freeShip = null;   // rescued ship flying back to you
   let stars = [];
 
   // Starfield background
@@ -155,24 +161,28 @@
   function spawnWave(n) {
     enemies = [];
     const left = formationLeft();
+    // Two boss aliens per wave sit in the top row (they wield the tractor beam).
+    const bossCols = [3, 4];
     for (let r = 0; r < ROWS; r++) {
       for (let c = 0; c < COLS; c++) {
-        // Top rows are tougher aliens.
-        const tier = r === 0 ? 2 : (r === 1 ? 1 : 0);
+        const isBoss = r === 0 && bossCols.includes(c);
+        const tier = isBoss ? 3 : (r === 0 ? 2 : (r === 1 ? 1 : 0));
         enemies.push({
           col: c, row: r,
           homeX: left + c * CELL_W,
           homeY: FORM_TOP + r * CELL_H,
           x: left + c * CELL_W,
           y: -40 - r * 30 - c * 6, // fly in from top
-          tier,
-          hp: tier + 1,
+          isBoss, tier,
+          hp: isBoss ? 3 : tier + 1,
           state: "enter",   // enter | form | dive
           t: Math.random() * Math.PI * 2,
-          diveT: 0,
-          path: null,
+          diveT: 0, path: null,
           fireCD: 1 + Math.random() * 3,
-          anim: Math.random() * Math.PI * 2
+          anim: Math.random() * Math.PI * 2,
+          // capture/beam fields
+          holding: false, beamDive: false, beamed: false,
+          beam: false, beamT: 0, captureProg: 0
         });
       }
     }
@@ -181,15 +191,16 @@
 
   function startGame() {
     score = 0; lives = 3; wave = 1;
-    bullets = []; enemyBullets = []; particles = [];
+    bullets = []; enemyBullets = []; particles = []; powerups = []; freeShip = null;
     player.x = W/2; player.invuln = 90; player.cool = 0;
+    player.dual = false; player.shield = 0; player.spread = 0; player.rapid = 0;
     spawnWave(wave);
     state = "play";
   }
 
   function togglePause() {
-    if (state === "play") { prevState = state; state = "paused"; }
-    else if (state === "paused") { state = "play"; }
+    if (state === "play") state = "paused";
+    else if (state === "paused") state = "play";
   }
 
   // ----- Helpers -----
@@ -203,9 +214,65 @@
       particles.push({ x, y, vx: Math.cos(a)*sp, vy: Math.sin(a)*sp, life: 1, color });
     }
   }
+  function floatText(x, y, text, color) {
+    particles.push({ text, x, y, vx: 0, vy: -30, life: 1.2, color });
+  }
   function addScore(n) {
     score += n;
     if (score > high) { high = score; localStorage.setItem("starSquadronHigh", high); }
+  }
+  function playerBox() {
+    return { x: player.x, y: player.y, w: player.dual ? 48 : player.w - 8, h: player.h - 6 };
+  }
+
+  // ----- Power-ups -----
+  const POWER_KINDS = [
+    { k: "spread", w: 3, color: "#ffd36b", label: "S" },
+    { k: "rapid",  w: 3, color: "#7fd0ff", label: "R" },
+    { k: "shield", w: 3, color: "#9be36b", label: "O" },
+    { k: "1up",    w: 1, color: "#ff8fbf", label: "1" }
+  ];
+  function dropPowerup(x, y) {
+    let total = POWER_KINDS.reduce((s, p) => s + p.w, 0);
+    let r = Math.random() * total;
+    let pick = POWER_KINDS[0];
+    for (const p of POWER_KINDS) { if ((r -= p.w) <= 0) { pick = p; break; } }
+    powerups.push({ x, y, vy: 90, kind: pick.k, color: pick.color, label: pick.label, t: 0 });
+  }
+  function applyPowerup(pu) {
+    Sound.power();
+    if (pu.kind === "spread") { player.spread = 10; floatText(player.x, player.y-20, "SPREAD", "#ffd36b"); }
+    else if (pu.kind === "rapid") { player.rapid = 10; floatText(player.x, player.y-20, "RAPID", "#7fd0ff"); }
+    else if (pu.kind === "shield") { player.shield = 8; floatText(player.x, player.y-20, "SHIELD", "#9be36b"); }
+    else if (pu.kind === "1up") { lives++; floatText(player.x, player.y-20, "1UP", "#ff8fbf"); }
+  }
+
+  // ----- Capture & rescue -----
+  function capturePlayer(boss) {
+    boss.beam = false;
+    boss.captureProg = 0;
+    Sound.capture();
+    boom(player.x, player.y, "#c77bff", 24);
+    if (player.dual) {
+      // The tractor beam tears away your second ship instead of costing a life.
+      player.dual = false;
+      player.invuln = 100;
+      floatText(player.x, player.y - 24, "SHIP LOST!", "#ff8fbf");
+    } else {
+      lives--;
+      if (lives <= 0) { boss.holding = true; boss.state = "enter"; state = "over"; return; }
+      player.invuln = 120;
+      player.x = W/2;
+    }
+    boss.holding = true;
+    boss.state = "enter"; // fly the captured ship back up to the formation as bait
+  }
+  function rescue(boss) {
+    // Shooting a boss that holds your ship frees it -> it flies down and docks as a dual fighter.
+    freeShip = { x: boss.x, y: boss.y };
+    addScore(1000);
+    floatText(boss.x, boss.y, "+1000 RESCUE", "#9be36b");
+    Sound.rescue();
   }
 
   // ----- Update -----
@@ -219,31 +286,63 @@
 
     formSwing = Math.sin(performance.now() / 900) * 18;
 
-    // --- Player ---
+    // --- Player timers ---
+    player.cool -= dt;
+    if (player.invuln > 0) player.invuln -= dt * 60;
+    player.shield = Math.max(0, player.shield - dt);
+    player.spread = Math.max(0, player.spread - dt);
+    player.rapid  = Math.max(0, player.rapid  - dt);
+
+    // --- Player movement ---
     let mv = 0;
     if (keys["ArrowLeft"] || keys["a"] || keys["A"]) mv -= 1;
     if (keys["ArrowRight"] || keys["d"] || keys["D"]) mv += 1;
     if (mv) player.x += mv * 300 * dt;
     if (touchX !== null) player.x += (touchX - player.x) * Math.min(1, dt * 14);
-    player.x = Math.max(player.w/2, Math.min(W - player.w/2, player.x));
+    const half = player.dual ? 28 : player.w/2;
+    player.x = Math.max(half, Math.min(W - half, player.x));
 
-    player.cool -= dt;
-    if (player.invuln > 0) player.invuln -= dt * 60;
+    // --- Firing (power-ups modify it) ---
     const wantFire = keys[" "] || firePressed;
     if (wantFire && player.cool <= 0) {
-      bullets.push({ x: player.x, y: player.y - 18, w: 4, h: 14, vy: -560 });
-      player.cool = 0.28;
+      const guns = player.dual ? [player.x - 14, player.x + 14] : [player.x];
+      for (const gx of guns) {
+        if (player.spread > 0) {
+          bullets.push({ x: gx, y: player.y - 18, w: 4, h: 14, vy: -540, vx: 0 });
+          bullets.push({ x: gx, y: player.y - 14, w: 4, h: 14, vy: -500, vx: -180 });
+          bullets.push({ x: gx, y: player.y - 14, w: 4, h: 14, vy: -500, vx: 180 });
+        } else {
+          bullets.push({ x: gx, y: player.y - 18, w: 4, h: 14, vy: -560, vx: 0 });
+        }
+      }
+      player.cool = player.rapid > 0 ? 0.12 : 0.28;
       Sound.shoot();
     }
     firePressed = false;
 
-    // --- Player bullets ---
-    for (const b of bullets) b.y += b.vy * dt;
-    bullets = bullets.filter(b => b.y > -20);
-
-    // --- Enemy bullets ---
-    for (const b of enemyBullets) { b.y += b.vy * dt; b.x += (b.vx||0) * dt; }
+    // --- Bullets ---
+    for (const b of bullets) { b.y += b.vy * dt; b.x += (b.vx || 0) * dt; }
+    bullets = bullets.filter(b => b.y > -20 && b.x > -20 && b.x < W + 20);
+    for (const b of enemyBullets) { b.y += b.vy * dt; b.x += (b.vx || 0) * dt; }
     enemyBullets = enemyBullets.filter(b => b.y < H + 20 && b.x > -20 && b.x < W + 20);
+
+    // --- Power-ups falling ---
+    for (const pu of powerups) { pu.y += pu.vy * dt; pu.t += dt; }
+    const pbox = playerBox();
+    powerups = powerups.filter(pu => {
+      if (rectHit({ x: pu.x, y: pu.y, w: 22, h: 22 }, pbox)) { applyPowerup(pu); return false; }
+      return pu.y < H + 20;
+    });
+
+    // --- Rescued ship docking ---
+    if (freeShip) {
+      freeShip.x += (player.x - freeShip.x) * Math.min(1, dt * 3);
+      freeShip.y += (player.y - freeShip.y) * Math.min(1, dt * 3);
+      if (Math.hypot(freeShip.x - player.x, freeShip.y - player.y) < 12) {
+        if (!player.dual) { player.dual = true; floatText(player.x, player.y - 24, "DUAL FIGHTER!", "#9be36b"); }
+        freeShip = null;
+      }
+    }
 
     // --- Enemies ---
     const left = formationLeft();
@@ -267,23 +366,30 @@
           e.fireCD = 2 + Math.random() * 4;
         }
       } else if (e.state === "dive") {
-        e.diveT += dt;
-        const p = e.path;
-        const tt = Math.min(1, e.diveT / p.dur);
-        const ease = tt;
-        const mx = p.sx + (p.ex - p.sx) * ease + Math.sin(ease * Math.PI * p.loops) * p.amp;
-        const my = p.sy + (p.ey - p.sy) * ease;
-        e.x = mx; e.y = my;
-        e.fireCD -= dt;
-        if (e.fireCD <= 0) {
-          const dx = player.x - e.x, dy = player.y - e.y;
-          const d = Math.hypot(dx, dy) || 1;
-          enemyBullets.push({ x: e.x, y: e.y + 12, w: 5, h: 12, vy: (dy/d)*260, vx: (dx/d)*180 });
-          e.fireCD = 0.6 + Math.random();
-        }
-        if (tt >= 1) {
-          e.y = -30; e.x = e.homeX + formSwing;
-          e.state = "enter";
+        if (e.beam) {
+          e.beamT += dt;
+          const halfBeam = 22 + Math.min(e.beamT, 1.2) * 20;
+          const inBeam = player.invuln <= 0 && Math.abs(player.x - e.x) < halfBeam && player.y > e.y;
+          if (inBeam && player.shield <= 0) e.captureProg += dt;
+          else e.captureProg = Math.max(0, e.captureProg - dt);
+          if (e.captureProg > 0.7) capturePlayer(e);
+          else if (e.beamT > 1.8) { e.beam = false; e.state = "enter"; }
+        } else {
+          e.diveT += dt;
+          const p = e.path;
+          const tt = Math.min(1, e.diveT / p.dur);
+          e.x = p.sx + (p.ex - p.sx) * tt + Math.sin(tt * Math.PI * p.loops) * p.amp;
+          e.y = p.sy + (p.ey - p.sy) * tt;
+          if (e.beamDive && !e.beamed && e.y > H * 0.5) {
+            e.beam = true; e.beamed = true; e.beamT = 0; e.captureProg = 0; Sound.beam();
+          }
+          e.fireCD -= dt;
+          if (!e.beam && e.fireCD <= 0) {
+            const dx = player.x - e.x, dy = player.y - e.y, d = Math.hypot(dx, dy) || 1;
+            enemyBullets.push({ x: e.x, y: e.y + 12, w: 5, h: 12, vy: (dy/d)*260, vx: (dx/d)*180 });
+            e.fireCD = 0.6 + Math.random();
+          }
+          if (tt >= 1) { e.y = -30; e.x = e.homeX + formSwing; e.state = "enter"; }
         }
       }
     }
@@ -297,9 +403,10 @@
       if (candidates.length) {
         const e = candidates[(Math.random() * candidates.length) | 0];
         const goLeft = player.x < W/2;
-        e.state = "dive";
-        e.diveT = 0;
-        e.fireCD = 0.4;
+        e.state = "dive"; e.diveT = 0; e.fireCD = 0.4;
+        // Bosses that aren't already holding a ship may make a capture (beam) run.
+        e.beamDive = e.isBoss && !e.holding && Math.random() < 0.6;
+        e.beamed = false;
         e.path = {
           sx: e.x, sy: e.y,
           ex: player.x + (Math.random()*120 - 60),
@@ -312,20 +419,24 @@
       }
     }
 
-    // --- Collisions: player bullets vs enemies ---
+    // --- Player bullets vs enemies ---
     for (const b of bullets) {
       for (const e of enemies) {
-        if (e.hp > 0 && rectHit(b, { x: e.x, y: e.y, w: 30, h: 26 })) {
+        if (e.hp > 0 && rectHit(b, { x: e.x, y: e.y, w: e.isBoss ? 34 : 30, h: 26 })) {
           b.y = -999;
           e.hp--;
           Sound.hit();
-          boom(e.x, e.y, e.tier === 2 ? "#ff6b6b" : e.tier === 1 ? "#c77bff" : "#5ad1ff", 6);
+          const col = e.tier === 3 ? "#6bffa0" : e.tier === 2 ? "#ff6b6b" : e.tier === 1 ? "#c77bff" : "#5ad1ff";
+          boom(e.x, e.y, col, 6);
           if (e.hp <= 0) {
-            const pts = (e.tier + 1) * 50 * (e.state === "dive" ? 2 : 1);
+            if (e.holding) rescue(e);
+            const base = (e.isBoss ? 200 : (e.tier + 1) * 50);
+            const pts = base * (e.state === "dive" ? 2 : 1);
             addScore(pts);
             boom(e.x, e.y, "#ffcf5a", 18);
             Sound.explode();
-            particles.push({ text: "+"+pts, x: e.x, y: e.y, vx: 0, vy: -30, life: 1, color: "#fff" });
+            floatText(e.x, e.y, "+" + pts, "#fff");
+            if (Math.random() < (e.isBoss ? 0.5 : 0.12)) dropPowerup(e.x, e.y);
           }
           break;
         }
@@ -333,20 +444,34 @@
     }
     enemies = enemies.filter(e => e.hp > 0);
 
-    // --- Collisions: enemy bullets / bodies vs player ---
+    // --- Enemy bullets / diving bodies vs player ---
     if (player.invuln <= 0) {
-      const pbox = { x: player.x, y: player.y, w: player.w - 8, h: player.h - 6 };
-      let hitBy = null;
-      for (const b of enemyBullets) if (rectHit(b, pbox)) { hitBy = b; break; }
-      if (!hitBy) for (const e of enemies) if (e.state === "dive" && rectHit({x:e.x,y:e.y,w:26,h:22}, pbox)) { hitBy = e; break; }
+      const box = playerBox();
+      let hitBullet = null, hitBody = null;
+      for (const b of enemyBullets) if (rectHit(b, box)) { hitBullet = b; break; }
+      if (!hitBullet) for (const e of enemies) if (e.state === "dive" && !e.beam && rectHit({x:e.x,y:e.y,w:24,h:22}, box)) { hitBody = e; break; }
+      const hitBy = hitBullet || hitBody;
       if (hitBy) {
-        lives--;
-        Sound.player();
-        boom(player.x, player.y, "#7fd0ff", 30);
-        enemyBullets = enemyBullets.filter(b => b !== hitBy);
-        player.invuln = 120;
-        player.x = W/2;
-        if (lives <= 0) state = "over";
+        if (player.shield > 0) {
+          // Shield absorbs the hit.
+          if (hitBullet) enemyBullets = enemyBullets.filter(b => b !== hitBullet);
+          boom(player.x, player.y - 4, "#9be36b", 10);
+          Sound.hit();
+        } else if (player.dual) {
+          // The second ship takes the hit; you keep flying.
+          player.dual = false; player.invuln = 90;
+          if (hitBullet) enemyBullets = enemyBullets.filter(b => b !== hitBullet);
+          boom(player.x, player.y, "#7fd0ff", 24);
+          floatText(player.x, player.y - 24, "SHIP LOST!", "#ff8fbf");
+          Sound.player();
+        } else {
+          lives--;
+          if (hitBullet) enemyBullets = enemyBullets.filter(b => b !== hitBullet);
+          boom(player.x, player.y, "#7fd0ff", 30);
+          Sound.player();
+          player.invuln = 120; player.x = W/2;
+          if (lives <= 0) state = "over";
+        }
       }
     }
 
@@ -359,7 +484,7 @@
     particles = particles.filter(p => p.life > 0);
 
     // --- Wave cleared ---
-    if (enemies.length === 0) {
+    if (enemies.length === 0 && !freeShip) {
       wave++;
       addScore(200);
       spawnWave(wave);
@@ -377,63 +502,97 @@
     ctx.globalAlpha = 1;
   }
 
-  // Player = a fighter ship
-  function drawShip(x, y, blink) {
-    if (blink) return;
+  // A single fighter ship centred at (x,y)
+  function drawShip(x, y) {
     ctx.save();
     ctx.translate(x, y);
-    // engine flames
     ctx.fillStyle = "#ffb14a";
     ctx.beginPath(); ctx.moveTo(-6, 12); ctx.lineTo(0, 18 + Math.random()*6); ctx.lineTo(6, 12); ctx.fill();
     ctx.fillStyle = "#7fd0ff";
     ctx.beginPath(); ctx.moveTo(-4, 12); ctx.lineTo(0, 16 + Math.random()*4); ctx.lineTo(4, 12); ctx.fill();
-    // hull
     ctx.fillStyle = "#e8eef8";
     ctx.beginPath();
-    ctx.moveTo(0, -16);           // nose
-    ctx.lineTo(6, 2);
-    ctx.lineTo(16, 12);           // right wingtip
-    ctx.lineTo(5, 10);
-    ctx.lineTo(0, 14);
-    ctx.lineTo(-5, 10);
-    ctx.lineTo(-16, 12);          // left wingtip
-    ctx.lineTo(-6, 2);
+    ctx.moveTo(0, -16); ctx.lineTo(6, 2); ctx.lineTo(16, 12); ctx.lineTo(5, 10);
+    ctx.lineTo(0, 14); ctx.lineTo(-5, 10); ctx.lineTo(-16, 12); ctx.lineTo(-6, 2);
     ctx.closePath(); ctx.fill();
-    // cockpit
     ctx.fillStyle = "#3aa0ff";
     ctx.beginPath(); ctx.ellipse(0, -4, 3.2, 6, 0, 0, Math.PI*2); ctx.fill();
-    // wing accents
     ctx.fillStyle = "#9fb4d4";
-    ctx.fillRect(-14, 9, 5, 3);
-    ctx.fillRect(9, 9, 5, 3);
+    ctx.fillRect(-14, 9, 5, 3); ctx.fillRect(9, 9, 5, 3);
     ctx.restore();
   }
 
-  // Enemy = alien fighter (animated legs/wings), colored by tier
+  // Player, honouring dual fighter, shield and invuln blink
+  function drawPlayer() {
+    if (player.invuln > 0 && ((player.invuln|0) % 12 < 6)) return;
+    if (player.dual) { drawShip(player.x - 14, player.y); drawShip(player.x + 14, player.y); }
+    else drawShip(player.x, player.y);
+    if (player.shield > 0) {
+      ctx.save();
+      ctx.strokeStyle = "rgba(155,227,107," + (0.5 + 0.3*Math.sin(performance.now()/120)) + ")";
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(player.x, player.y, player.dual ? 34 : 24, 0, Math.PI*2); ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  // Alien fighter, coloured by tier (3 = boss)
   function drawAlien(e) {
     const wig = Math.sin(e.anim) * 3;
-    const body = e.tier === 2 ? "#ff6b6b" : e.tier === 1 ? "#c77bff" : "#5ad1ff";
-    const dark = e.tier === 2 ? "#a02f2f" : e.tier === 1 ? "#7b3fb0" : "#2f7fa0";
+    const body = e.tier === 3 ? "#6bffa0" : e.tier === 2 ? "#ff6b6b" : e.tier === 1 ? "#c77bff" : "#5ad1ff";
+    const dark = e.tier === 3 ? "#2f9a5f" : e.tier === 2 ? "#a02f2f" : e.tier === 1 ? "#7b3fb0" : "#2f7fa0";
+
+    // Tractor beam (drawn behind the boss)
+    if (e.beam) {
+      const halfBeam = 22 + Math.min(e.beamT, 1.2) * 20;
+      const g = ctx.createLinearGradient(0, e.y, 0, H);
+      g.addColorStop(0, "rgba(140,120,255,.55)");
+      g.addColorStop(1, "rgba(140,120,255,0)");
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.moveTo(e.x - 10, e.y); ctx.lineTo(e.x + 10, e.y);
+      ctx.lineTo(e.x + halfBeam, H); ctx.lineTo(e.x - halfBeam, H);
+      ctx.closePath(); ctx.fill();
+    }
+
     ctx.save();
     ctx.translate(e.x, e.y);
-    if (e.state === "dive") ctx.rotate(Math.PI); // dive nose-first toward player
-    // outer wings
+
+    // Captured ship riding above a holding boss (drawn upright, above the alien)
+    if (e.holding) {
+      ctx.save(); ctx.translate(0, -22); ctx.scale(0.85, 0.85); ctx.globalAlpha = 0.9; drawShip(0, 0); ctx.restore();
+    }
+
+    if (e.state === "dive" && !e.beam) ctx.rotate(Math.PI);
     ctx.strokeStyle = dark; ctx.lineWidth = 3; ctx.lineCap = "round";
     ctx.beginPath();
     ctx.moveTo(-14, 6 + wig); ctx.lineTo(-8, -2); ctx.lineTo(-12, -8 - wig);
     ctx.moveTo(14, 6 + wig); ctx.lineTo(8, -2); ctx.lineTo(12, -8 - wig);
     ctx.stroke();
-    // body
     ctx.fillStyle = body;
-    ctx.beginPath(); ctx.ellipse(0, 0, 11, 9, 0, 0, Math.PI*2); ctx.fill();
-    // shell markings
+    ctx.beginPath(); ctx.ellipse(0, 0, e.isBoss ? 12 : 11, e.isBoss ? 10 : 9, 0, 0, Math.PI*2); ctx.fill();
     ctx.fillStyle = dark;
     ctx.beginPath(); ctx.moveTo(-6, -2); ctx.lineTo(0, -9); ctx.lineTo(6, -2); ctx.closePath(); ctx.fill();
-    // eyes
     ctx.fillStyle = "#fffbe0";
     ctx.beginPath(); ctx.arc(-4, 1, 2.4, 0, Math.PI*2); ctx.arc(4, 1, 2.4, 0, Math.PI*2); ctx.fill();
     ctx.fillStyle = "#141018";
     ctx.beginPath(); ctx.arc(-4, 1, 1.1, 0, Math.PI*2); ctx.arc(4, 1, 1.1, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+  }
+
+  function drawPowerup(pu) {
+    ctx.save();
+    ctx.translate(pu.x, pu.y);
+    ctx.rotate(Math.sin(pu.t * 3) * 0.3);
+    ctx.fillStyle = pu.color;
+    ctx.globalAlpha = 0.9;
+    ctx.fillRect(-10, -10, 20, 20);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = "#0a0c18";
+    ctx.font = "bold 14px 'Courier New', monospace";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(pu.label, 0, 1);
+    ctx.textBaseline = "alphabetic";
     ctx.restore();
   }
 
@@ -448,22 +607,32 @@
     ctx.textAlign = "right";
     ctx.fillStyle = "#eaf2ff";
     ctx.fillText("WAVE " + wave, W - 12, 24);
+
+    // Lives
     for (let i = 0; i < lives; i++) {
-      ctx.save();
-      ctx.translate(22 + i * 26, H - 18); ctx.scale(0.7, 0.7);
-      drawShip(0, 0, false);
-      ctx.restore();
+      ctx.save(); ctx.translate(22 + i * 26, H - 18); ctx.scale(0.7, 0.7); drawShip(0, 0); ctx.restore();
     }
+    // Active power-up timers (top-left, under score)
+    const active = [];
+    if (player.spread > 0) active.push(["SPREAD", player.spread, "#ffd36b"]);
+    if (player.rapid  > 0) active.push(["RAPID",  player.rapid,  "#7fd0ff"]);
+    if (player.shield > 0) active.push(["SHIELD", player.shield, "#9be36b"]);
+    ctx.textAlign = "left"; ctx.font = "11px 'Courier New', monospace";
+    active.forEach((a, i) => {
+      const y = 40 + i * 16;
+      ctx.fillStyle = a[2];
+      ctx.fillText(a[0] + " " + Math.ceil(a[1]) + "s", 12, y);
+    });
   }
 
   function centerText(lines) {
     ctx.textAlign = "center";
-    let y = H/2 - (lines.length * 18);
+    let y = H/2 - (lines.length * 16);
     for (const l of lines) {
-      ctx.font = l.big ? "bold 34px 'Courier New', monospace" : (l.small ? "14px 'Courier New', monospace" : "18px 'Courier New', monospace");
+      ctx.font = l.big ? "bold 34px 'Courier New', monospace" : (l.small ? "13px 'Courier New', monospace" : "18px 'Courier New', monospace");
       ctx.fillStyle = l.color || "#eaf2ff";
       ctx.fillText(l.t, W/2, y);
-      y += l.big ? 48 : 30;
+      y += l.big ? 46 : 26;
     }
   }
 
@@ -477,20 +646,23 @@
       centerText([
         { t: "STAR", big: true, color: "#ffd36b" },
         { t: "SQUADRON", big: true, color: "#7fd0ff" },
-        { t: "", },
-        { t: "Hold the line against the alien swarm.", small: true, color: "#9fb0d6" },
         { t: "", small: true },
-        { t: "← →  MOVE      SPACE  FIRE", color: "#eaf2ff" },
-        { t: "P  PAUSE   ·   touch: drag & tap", small: true, color: "#9fb0d6" },
-        { t: "", },
+        { t: "Hold the line against the alien swarm.", small: true, color: "#9fb0d6" },
+        { t: "Grab power-ups: S spread · R rapid · O shield · 1 up", small: true, color: "#9fb0d6" },
+        { t: "Green bosses beam-capture your ship —", small: true, color: "#9fb0d6" },
+        { t: "shoot one holding your ship to fly a DUAL FIGHTER!", small: true, color: "#9be36b" },
+        { t: "", small: true },
+        { t: "← →  MOVE    SPACE  FIRE    P  PAUSE", color: "#eaf2ff" },
+        { t: "", small: true },
         { t: "PRESS ANY KEY / TAP TO START", color: "#9be36b" },
         { t: high > 0 ? "HIGH SCORE  " + high : "", small: true, color: "#ffd36b" },
       ]);
-      drawShip(W/2, H - 120, false);
+      drawShip(W/2, H - 110);
       return;
     }
 
     for (const e of enemies) drawAlien(e);
+    for (const pu of powerups) drawPowerup(pu);
 
     ctx.fillStyle = "#ffe37a";
     for (const b of bullets) ctx.fillRect(b.x - b.w/2, b.y - b.h/2, b.w, b.h);
@@ -499,7 +671,7 @@
 
     for (const p of particles) {
       if (p.text) {
-        ctx.globalAlpha = Math.max(0, p.life);
+        ctx.globalAlpha = Math.max(0, Math.min(1, p.life));
         ctx.fillStyle = p.color; ctx.font = "12px 'Courier New', monospace"; ctx.textAlign = "center";
         ctx.fillText(p.text, p.x, p.y);
       } else {
@@ -510,7 +682,8 @@
     }
     ctx.globalAlpha = 1;
 
-    if (state !== "over") drawShip(player.x, player.y, player.invuln > 0 && ((player.invuln|0) % 12 < 6));
+    if (freeShip) drawShip(freeShip.x, freeShip.y);
+    if (state !== "over") drawPlayer();
 
     drawHUD();
 
@@ -524,7 +697,7 @@
         { t: "GAME OVER", big: true, color: "#ff6b6b" },
         { t: "SCORE  " + score, color: "#eaf2ff" },
         { t: (score >= high ? "NEW HIGH SCORE!" : "HIGH  " + high), color: "#ffd36b" },
-        { t: "", },
+        { t: "", small: true },
         { t: "PRESS ANY KEY / TAP TO RETRY", color: "#9be36b" },
       ]);
     }
