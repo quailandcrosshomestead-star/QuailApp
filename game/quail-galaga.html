@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Quail Galaga</title>
+<style>
+  :root { color-scheme: dark; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    height: 100%;
+    background: #05060f;
+    font-family: "Courier New", monospace;
+    color: #eaf2ff;
+    overflow: hidden;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #wrap {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  #game {
+    display: block;
+    background: #05060f;
+    box-shadow: 0 0 60px rgba(90,140,255,.25);
+    touch-action: none;
+  }
+  #hint {
+    position: fixed;
+    bottom: 8px;
+    left: 0; right: 0;
+    text-align: center;
+    font-size: 12px;
+    color: #5f6b8a;
+    pointer-events: none;
+    letter-spacing: 1px;
+  }
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="game"></canvas></div>
+<div id="hint">← → move &nbsp;·&nbsp; SPACE fire &nbsp;·&nbsp; P pause &nbsp;·&nbsp; touch: drag to move, tap to fire</div>
+<script>
+(() => {
+  "use strict";
+
+  // ----- Logical resolution (game is designed at this size, then scaled) -----
+  const W = 480, H = 720;
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d");
+
+  // Fit canvas to the window while keeping aspect ratio + crispness on HiDPI.
+  function resize() {
+    const dpr = window.devicePixelRatio || 1;
+    const scale = Math.min(window.innerWidth / W, window.innerHeight / H);
+    canvas.width = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+    canvas.style.width = Math.round(W * scale) + "px";
+    canvas.style.height = Math.round(H * scale) + "px";
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+  }
+  window.addEventListener("resize", resize);
+  resize();
+
+  // ----- Tiny WebAudio sound engine (no assets) -----
+  const Sound = (() => {
+    let ac = null;
+    function ctxNow() {
+      if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return null; } }
+      if (ac.state === "suspended") ac.resume();
+      return ac;
+    }
+    function blip(freq, dur, type = "square", vol = 0.12, slideTo = null) {
+      const a = ctxNow(); if (!a) return;
+      const o = a.createOscillator(), g = a.createGain();
+      o.type = type; o.frequency.setValueAtTime(freq, a.currentTime);
+      if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, a.currentTime + dur);
+      g.gain.setValueAtTime(vol, a.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.0001, a.currentTime + dur);
+      o.connect(g); g.connect(a.destination);
+      o.start(); o.stop(a.currentTime + dur);
+    }
+    function noise(dur, vol = 0.18) {
+      const a = ctxNow(); if (!a) return;
+      const n = a.sampleRate * dur;
+      const buf = a.createBuffer(1, n, a.sampleRate);
+      const d = buf.getChannelData(0);
+      for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n);
+      const src = a.createBufferSource(); src.buffer = buf;
+      const g = a.createGain(); g.gain.setValueAtTime(vol, a.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.0001, a.currentTime + dur);
+      src.connect(g); g.connect(a.destination); src.start();
+    }
+    return {
+      shoot: () => blip(880, 0.08, "square", 0.08, 1400),
+      hit:   () => blip(200, 0.09, "sawtooth", 0.12, 90),
+      explode: () => noise(0.35, 0.22),
+      dive:  () => blip(500, 0.18, "triangle", 0.06, 180),
+      player:() => { noise(0.5, 0.3); blip(160, 0.5, "sawtooth", 0.15, 40); },
+      wave:  () => { blip(523,0.1,"square",0.1); setTimeout(()=>blip(659,0.1,"square",0.1),100); setTimeout(()=>blip(784,0.14,"square",0.1),200); },
+      resume: () => ctxNow()
+    };
+  })();
+
+  // ----- Input -----
+  const keys = {};
+  let firePressed = false;
+  addEventListener("keydown", e => {
+    if (["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"," "].includes(e.key)) e.preventDefault();
+    keys[e.key] = true;
+    if (e.key === " ") firePressed = true;
+    if (e.key.toLowerCase() === "p") togglePause();
+    if (state === "title" || state === "over") startGame();
+    Sound.resume();
+  });
+  addEventListener("keyup", e => { keys[e.key] = false; });
+
+  // Touch: drag to move, tap to fire.
+  let touchX = null;
+  function canvasX(clientX) {
+    const r = canvas.getBoundingClientRect();
+    return (clientX - r.left) / r.width * W;
+  }
+  canvas.addEventListener("touchstart", e => {
+    e.preventDefault();
+    Sound.resume();
+    if (state === "title" || state === "over") { startGame(); return; }
+    touchX = canvasX(e.touches[0].clientX);
+    firePressed = true;
+  }, { passive: false });
+  canvas.addEventListener("touchmove", e => {
+    e.preventDefault();
+    touchX = canvasX(e.touches[0].clientX);
+  }, { passive: false });
+  canvas.addEventListener("touchend", e => { e.preventDefault(); touchX = null; }, { passive: false });
+
+  // ----- Game state -----
+  let state = "title"; // title | play | over | paused
+  let prevState = "play";
+  let score = 0, lives = 3, wave = 1;
+  let high = +(localStorage.getItem("quailGalagaHigh") || 0);
+
+  const player = { x: W/2, y: H - 60, w: 34, h: 26, cool: 0, invuln: 0 };
+  let bullets = [];      // player shots
+  let enemyBullets = []; // hawk shots
+  let enemies = [];
+  let particles = [];
+  let stars = [];
+
+  // Starfield background
+  for (let i = 0; i < 90; i++) {
+    stars.push({ x: Math.random()*W, y: Math.random()*H, s: Math.random()*2+0.4, v: Math.random()*30+12 });
+  }
+
+  // Formation geometry
+  const COLS = 8, ROWS = 4;
+  const CELL_W = 44, CELL_H = 42;
+  const FORM_TOP = 80;
+  function formationLeft() { return (W - COLS * CELL_W) / 2 + CELL_W/2; }
+
+  let formSwing = 0; // horizontal sway of whole formation
+
+  function spawnWave(n) {
+    enemies = [];
+    const left = formationLeft();
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        // Top rows are tougher hawks.
+        const tier = r === 0 ? 2 : (r === 1 ? 1 : 0);
+        enemies.push({
+          col: c, row: r,
+          homeX: left + c * CELL_W,
+          homeY: FORM_TOP + r * CELL_H,
+          x: left + c * CELL_W,
+          y: -40 - r * 30 - c * 6, // fly in from top
+          tier,
+          hp: tier + 1,
+          state: "enter",   // enter | form | dive
+          t: Math.random() * Math.PI * 2,
+          diveT: 0,
+          path: null,
+          fireCD: 1 + Math.random() * 3,
+          wing: Math.random() * Math.PI * 2
+        });
+      }
+    }
+    Sound.wave();
+  }
+
+  function startGame() {
+    score = 0; lives = 3; wave = 1;
+    bullets = []; enemyBullets = []; particles = [];
+    player.x = W/2; player.invuln = 90; player.cool = 0;
+    spawnWave(wave);
+    state = "play";
+  }
+
+  function togglePause() {
+    if (state === "play") { prevState = state; state = "paused"; }
+    else if (state === "paused") { state = "play"; }
+  }
+
+  // ----- Helpers -----
+  function rectHit(a, b) {
+    return a.x - a.w/2 < b.x + b.w/2 && a.x + a.w/2 > b.x - b.w/2 &&
+           a.y - a.h/2 < b.y + b.h/2 && a.y + a.h/2 > b.y - b.h/2;
+  }
+  function boom(x, y, color, count = 16) {
+    for (let i = 0; i < count; i++) {
+      const a = Math.random() * Math.PI * 2, sp = Math.random() * 3 + 1;
+      particles.push({ x, y, vx: Math.cos(a)*sp, vy: Math.sin(a)*sp, life: 1, color });
+    }
+  }
+  function addScore(n) {
+    score += n;
+    if (score > high) { high = score; localStorage.setItem("quailGalagaHigh", high); }
+  }
+
+  // ----- Update -----
+  let last = performance.now();
+  function update(dt) {
+    // Stars always drift
+    for (const s of stars) {
+      s.y += s.v * dt;
+      if (s.y > H) { s.y = 0; s.x = Math.random() * W; }
+    }
+    if (state !== "play") return;
+
+    formSwing = Math.sin(performance.now() / 900) * 18;
+
+    // --- Player ---
+    let mv = 0;
+    if (keys["ArrowLeft"] || keys["a"] || keys["A"]) mv -= 1;
+    if (keys["ArrowRight"] || keys["d"] || keys["D"]) mv += 1;
+    if (mv) player.x += mv * 300 * dt;
+    if (touchX !== null) player.x += (touchX - player.x) * Math.min(1, dt * 14);
+    player.x = Math.max(player.w/2, Math.min(W - player.w/2, player.x));
+
+    player.cool -= dt;
+    if (player.invuln > 0) player.invuln -= dt * 60;
+    const wantFire = keys[" "] || firePressed;
+    if (wantFire && player.cool <= 0) {
+      bullets.push({ x: player.x, y: player.y - 16, w: 5, h: 14, vy: -560 });
+      player.cool = 0.28;
+      Sound.shoot();
+    }
+    firePressed = false;
+
+    // --- Player bullets ---
+    for (const b of bullets) b.y += b.vy * dt;
+    bullets = bullets.filter(b => b.y > -20);
+
+    // --- Enemy bullets ---
+    for (const b of enemyBullets) { b.y += b.vy * dt; b.x += (b.vx||0) * dt; }
+    enemyBullets = enemyBullets.filter(b => b.y < H + 20 && b.x > -20 && b.x < W + 20);
+
+    // --- Enemies ---
+    const left = formationLeft();
+    let anyDiving = false;
+    for (const e of enemies) {
+      e.wing += dt * 10;
+      e.homeX = left + e.col * CELL_W;
+      e.homeY = FORM_TOP + e.row * CELL_H;
+
+      if (e.state === "enter") {
+        const tx = e.homeX, ty = e.homeY;
+        e.x += (tx - e.x) * Math.min(1, dt * 3);
+        e.y += (ty - e.y) * Math.min(1, dt * 3);
+        if (Math.abs(e.x - tx) < 1 && Math.abs(e.y - ty) < 2) e.state = "form";
+      } else if (e.state === "form") {
+        e.t += dt;
+        e.x = e.homeX + formSwing;
+        e.y = e.homeY + Math.sin(e.t * 2 + e.col) * 3;
+        // Occasionally shoot straight down
+        e.fireCD -= dt;
+        if (e.fireCD <= 0 && Math.random() < 0.5) {
+          enemyBullets.push({ x: e.x, y: e.y + 14, w: 5, h: 12, vy: 240 });
+          e.fireCD = 2 + Math.random() * 4;
+        }
+      } else if (e.state === "dive") {
+        anyDiving = true;
+        e.diveT += dt;
+        // Swooping bezier-ish dive toward player, then loop back up off-screen
+        const p = e.path;
+        const tt = Math.min(1, e.diveT / p.dur);
+        const ease = tt;
+        const mx = p.sx + (p.ex - p.sx) * ease + Math.sin(ease * Math.PI * p.loops) * p.amp;
+        const my = p.sy + (p.ey - p.sy) * ease;
+        e.x = mx; e.y = my;
+        // fire while diving
+        e.fireCD -= dt;
+        if (e.fireCD <= 0) {
+          const dx = player.x - e.x, dy = player.y - e.y;
+          const d = Math.hypot(dx, dy) || 1;
+          enemyBullets.push({ x: e.x, y: e.y + 12, w: 5, h: 12, vy: (dy/d)*260, vx: (dx/d)*180 });
+          e.fireCD = 0.6 + Math.random();
+        }
+        if (tt >= 1) {
+          // returned; snap back to formation from the top
+          e.y = -30; e.x = e.homeX + formSwing;
+          e.state = "enter";
+        }
+      }
+    }
+
+    // Trigger dives: pick idle formation enemies at random, more often on higher waves
+    const diveChance = (0.25 + wave * 0.06) * dt;
+    const divingCount = enemies.filter(e => e.state === "dive").length;
+    const maxDivers = Math.min(1 + Math.floor(wave / 2), 4);
+    if (divingCount < maxDivers && Math.random() < diveChance) {
+      const candidates = enemies.filter(e => e.state === "form");
+      if (candidates.length) {
+        const e = candidates[(Math.random() * candidates.length) | 0];
+        const goLeft = player.x < W/2;
+        e.state = "dive";
+        e.diveT = 0;
+        e.fireCD = 0.4;
+        e.path = {
+          sx: e.x, sy: e.y,
+          ex: player.x + (Math.random()*120 - 60),
+          ey: H + 40,
+          amp: (goLeft ? -1 : 1) * (60 + Math.random()*80),
+          loops: 1 + Math.random(),
+          dur: 2.2 + Math.random()*0.8
+        };
+        Sound.dive();
+      }
+    }
+
+    // --- Collisions: player bullets vs enemies ---
+    for (const b of bullets) {
+      for (const e of enemies) {
+        if (e.hp > 0 && rectHit(b, { x: e.x, y: e.y, w: 30, h: 26 })) {
+          b.y = -999; // consume
+          e.hp--;
+          Sound.hit();
+          boom(e.x, e.y, e.tier === 2 ? "#ff6b6b" : e.tier === 1 ? "#ffd36b" : "#9be36b", 6);
+          if (e.hp <= 0) {
+            const pts = (e.tier + 1) * 50 * (e.state === "dive" ? 2 : 1);
+            addScore(pts);
+            boom(e.x, e.y, "#ffcf5a", 18);
+            Sound.explode();
+            particles.push({ text: "+"+pts, x: e.x, y: e.y, vx: 0, vy: -30, life: 1, color: "#fff" });
+          }
+          break;
+        }
+      }
+    }
+    enemies = enemies.filter(e => e.hp > 0);
+
+    // --- Collisions: enemy bullets / bodies vs player ---
+    if (player.invuln <= 0) {
+      const pbox = { x: player.x, y: player.y, w: player.w - 8, h: player.h - 6 };
+      let hitBy = null;
+      for (const b of enemyBullets) if (rectHit(b, pbox)) { hitBy = b; break; }
+      if (!hitBy) for (const e of enemies) if (e.state === "dive" && rectHit({x:e.x,y:e.y,w:26,h:22}, pbox)) { hitBy = e; break; }
+      if (hitBy) {
+        lives--;
+        Sound.player();
+        boom(player.x, player.y, "#7fd0ff", 30);
+        enemyBullets = enemyBullets.filter(b => b !== hitBy);
+        player.invuln = 120;
+        player.x = W/2;
+        if (lives <= 0) {
+          state = "over";
+        }
+      }
+    }
+
+    // --- Particles ---
+    for (const p of particles) {
+      p.x += p.vx * dt * 60 * 0.25;
+      p.y += p.vy * dt * 60 * 0.25;
+      p.life -= dt * 1.4;
+    }
+    particles = particles.filter(p => p.life > 0);
+
+    // --- Wave cleared ---
+    if (enemies.length === 0) {
+      wave++;
+      addScore(200);
+      spawnWave(wave);
+      player.invuln = 60;
+    }
+  }
+
+  // ----- Drawing -----
+  function drawStars() {
+    for (const s of stars) {
+      ctx.globalAlpha = 0.3 + s.s / 3;
+      ctx.fillStyle = "#cfe0ff";
+      ctx.fillRect(s.x, s.y, s.s, s.s);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // Player = a little quail gunship
+  function drawQuail(x, y, blink) {
+    if (blink) return;
+    ctx.save();
+    ctx.translate(x, y);
+    // body
+    ctx.fillStyle = "#d9a566";
+    ctx.beginPath(); ctx.ellipse(0, 4, 15, 11, 0, 0, Math.PI*2); ctx.fill();
+    // belly
+    ctx.fillStyle = "#f2dcb0";
+    ctx.beginPath(); ctx.ellipse(0, 8, 10, 6, 0, 0, Math.PI*2); ctx.fill();
+    // head
+    ctx.fillStyle = "#b9793f";
+    ctx.beginPath(); ctx.arc(0, -8, 8, 0, Math.PI*2); ctx.fill();
+    // topknot (quail plume)
+    ctx.strokeStyle = "#2b1d12"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(0, -15); ctx.quadraticCurveTo(6, -22, 2, -26); ctx.stroke();
+    // beak
+    ctx.fillStyle = "#f4b23e";
+    ctx.beginPath(); ctx.moveTo(0, -10); ctx.lineTo(-6, -6); ctx.lineTo(0, -4); ctx.fill();
+    // eye
+    ctx.fillStyle = "#1a120a";
+    ctx.beginPath(); ctx.arc(3, -9, 1.6, 0, Math.PI*2); ctx.fill();
+    // little thruster
+    ctx.fillStyle = "#7fd0ff";
+    ctx.fillRect(-4, 14, 8, 4 + Math.random()*4);
+    ctx.restore();
+  }
+
+  // Enemy = a hawk (flapping wings)
+  function drawHawk(e) {
+    const flap = Math.sin(e.wing) * 6;
+    const col = e.tier === 2 ? "#e15b5b" : e.tier === 1 ? "#e0a24a" : "#8a94a8";
+    const dark = e.tier === 2 ? "#8f2f2f" : e.tier === 1 ? "#8a5e1f" : "#4a5266";
+    ctx.save();
+    ctx.translate(e.x, e.y);
+    if (e.state === "dive") ctx.rotate(Math.sin(e.diveT*6) * 0.15);
+    // wings
+    ctx.fillStyle = dark;
+    ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(-20, -4 - flap); ctx.lineTo(-14, 6); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(20, -4 - flap); ctx.lineTo(14, 6); ctx.closePath(); ctx.fill();
+    // body
+    ctx.fillStyle = col;
+    ctx.beginPath(); ctx.ellipse(0, 2, 9, 11, 0, 0, Math.PI*2); ctx.fill();
+    // head
+    ctx.beginPath(); ctx.arc(0, -8, 6, 0, Math.PI*2); ctx.fill();
+    // beak (hooked, pointing down)
+    ctx.fillStyle = "#f4b23e";
+    ctx.beginPath(); ctx.moveTo(0, -4); ctx.lineTo(-3, 1); ctx.lineTo(3, 1); ctx.fill();
+    // eyes
+    ctx.fillStyle = "#fff";
+    ctx.beginPath(); ctx.arc(-2.5, -9, 1.6, 0, Math.PI*2); ctx.arc(2.5, -9, 1.6, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = "#111";
+    ctx.beginPath(); ctx.arc(-2.5, -9, 0.8, 0, Math.PI*2); ctx.arc(2.5, -9, 0.8, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+  }
+
+  function drawHUD() {
+    ctx.fillStyle = "#eaf2ff";
+    ctx.font = "16px 'Courier New', monospace";
+    ctx.textAlign = "left";
+    ctx.fillText("SCORE " + String(score).padStart(6, "0"), 12, 24);
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#ffd36b";
+    ctx.fillText("HI " + String(high).padStart(6, "0"), W/2, 24);
+    ctx.textAlign = "right";
+    ctx.fillStyle = "#eaf2ff";
+    ctx.fillText("WAVE " + wave, W - 12, 24);
+    // lives as little quail icons
+    for (let i = 0; i < lives; i++) {
+      ctx.save();
+      ctx.translate(24 + i * 26, H - 20); ctx.scale(0.6, 0.6);
+      drawQuail(0, 0, false);
+      ctx.restore();
+    }
+  }
+
+  function centerText(lines) {
+    ctx.textAlign = "center";
+    let y = H/2 - (lines.length * 18);
+    for (const l of lines) {
+      ctx.font = l.big ? "bold 34px 'Courier New', monospace" : (l.small ? "14px 'Courier New', monospace" : "18px 'Courier New', monospace");
+      ctx.fillStyle = l.color || "#eaf2ff";
+      ctx.fillText(l.t, W/2, y);
+      y += l.big ? 48 : 30;
+    }
+  }
+
+  function render() {
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = "#05060f";
+    ctx.fillRect(0, 0, W, H);
+    drawStars();
+
+    if (state === "title") {
+      centerText([
+        { t: "QUAIL", big: true, color: "#ffd36b" },
+        { t: "GALAGA", big: true, color: "#7fd0ff" },
+        { t: "", },
+        { t: "Defend the covey from diving hawks!", small: true, color: "#9fb0d6" },
+        { t: "", small: true },
+        { t: "← →  MOVE      SPACE  FIRE", color: "#eaf2ff" },
+        { t: "P  PAUSE   ·   touch: drag & tap", small: true, color: "#9fb0d6" },
+        { t: "", },
+        { t: "PRESS ANY KEY / TAP TO START", color: "#9be36b" },
+        { t: high > 0 ? "HIGH SCORE  " + high : "", small: true, color: "#ffd36b" },
+      ]);
+      drawQuail(W/2, H - 120, false);
+      return;
+    }
+
+    // Play field
+    for (const e of enemies) drawHawk(e);
+
+    ctx.fillStyle = "#ffe37a";
+    for (const b of bullets) ctx.fillRect(b.x - b.w/2, b.y - b.h/2, b.w, b.h);
+    ctx.fillStyle = "#ff7a7a";
+    for (const b of enemyBullets) ctx.fillRect(b.x - b.w/2, b.y - b.h/2, b.w, b.h);
+
+    for (const p of particles) {
+      if (p.text) {
+        ctx.globalAlpha = Math.max(0, p.life);
+        ctx.fillStyle = p.color; ctx.font = "12px 'Courier New', monospace"; ctx.textAlign = "center";
+        ctx.fillText(p.text, p.x, p.y);
+      } else {
+        ctx.globalAlpha = Math.max(0, p.life);
+        ctx.fillStyle = p.color;
+        ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
+      }
+    }
+    ctx.globalAlpha = 1;
+
+    if (state !== "over") drawQuail(player.x, player.y, player.invuln > 0 && ((player.invuln|0) % 12 < 6));
+
+    drawHUD();
+
+    if (state === "paused") {
+      ctx.fillStyle = "rgba(5,6,15,.6)"; ctx.fillRect(0,0,W,H);
+      centerText([{ t: "PAUSED", big: true, color: "#7fd0ff" }, { t: "Press P to resume", small: true }]);
+    }
+    if (state === "over") {
+      ctx.fillStyle = "rgba(5,6,15,.7)"; ctx.fillRect(0,0,W,H);
+      centerText([
+        { t: "GAME OVER", big: true, color: "#ff6b6b" },
+        { t: "SCORE  " + score, color: "#eaf2ff" },
+        { t: (score >= high ? "NEW HIGH SCORE!" : "HIGH  " + high), color: "#ffd36b" },
+        { t: "", },
+        { t: "PRESS ANY KEY / TAP TO RETRY", color: "#9be36b" },
+      ]);
+    }
+  }
+
+  // ----- Main loop -----
+  function frame(now) {
+    let dt = (now - last) / 1000;
+    last = now;
+    if (dt > 0.05) dt = 0.05; // clamp after tab switch
+    update(dt);
+    render();
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
