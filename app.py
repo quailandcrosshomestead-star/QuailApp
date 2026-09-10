@@ -1,5 +1,4 @@
 import streamlit as st
-import streamlit.components.v1 as components
 import pandas as pd
 from datetime import datetime, timedelta
 import os
@@ -31,7 +30,7 @@ if st.sidebar.button("Add to Log"):
     st.sidebar.success("Logged!")
 
 # Dashboard Tabs
-tab1, tab2, tab3 = st.tabs(["📊 Collection Stats", "🐣 Incubation Timer", "🎮 Quail Galaga"])
+tab1, tab2 = st.tabs(["📊 Collection Stats", "🐣 Incubation Timer"])
 
 with tab1:
     st.subheader("Collection History")
@@ -54,15 +53,5 @@ with tab2:
     col1, col2 = st.columns(2)
     col1.metric("🔒 Lockdown", lockdown.strftime("%b %d"))
     col2.metric("🐣 Hatch Day", hatch.strftime("%b %d"))
-
+    
     st.warning(f"Stop turning eggs on {lockdown.strftime('%A, %b %d')}!")
-
-with tab3:
-    st.subheader("Take a break — defend the covey from diving hawks!")
-    st.caption("← → move · SPACE fire · P pause · (on touch screens: drag to move, tap to fire)")
-    GAME_FILE = os.path.join(os.path.dirname(__file__), "game", "quail-galaga.html")
-    if os.path.exists(GAME_FILE):
-        with open(GAME_FILE, "r", encoding="utf-8") as f:
-            components.html(f.read(), height=760, scrolling=False)
-    else:
-        st.error("Game file not found at game/quail-galaga.html")

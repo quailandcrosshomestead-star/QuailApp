@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Quail Galaga</title>
+<title>Star Squadron</title>
 <style>
   :root { color-scheme: dark; }
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -15,13 +15,7 @@
     overflow: hidden;
     -webkit-tap-highlight-color: transparent;
   }
-  #wrap {
-    position: fixed;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
+  #wrap { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }
   #game {
     display: block;
     background: #05060f;
@@ -29,14 +23,9 @@
     touch-action: none;
   }
   #hint {
-    position: fixed;
-    bottom: 8px;
-    left: 0; right: 0;
-    text-align: center;
-    font-size: 12px;
-    color: #5f6b8a;
-    pointer-events: none;
-    letter-spacing: 1px;
+    position: fixed; bottom: 8px; left: 0; right: 0;
+    text-align: center; font-size: 12px; color: #5f6b8a;
+    pointer-events: none; letter-spacing: 1px;
   }
 </style>
 </head>
@@ -52,7 +41,6 @@
   const canvas = document.getElementById("game");
   const ctx = canvas.getContext("2d");
 
-  // Fit canvas to the window while keeping aspect ratio + crispness on HiDPI.
   function resize() {
     const dpr = window.devicePixelRatio || 1;
     const scale = Math.min(window.innerWidth / W, window.innerHeight / H);
@@ -142,11 +130,11 @@
   let state = "title"; // title | play | over | paused
   let prevState = "play";
   let score = 0, lives = 3, wave = 1;
-  let high = +(localStorage.getItem("quailGalagaHigh") || 0);
+  let high = +(localStorage.getItem("starSquadronHigh") || 0);
 
-  const player = { x: W/2, y: H - 60, w: 34, h: 26, cool: 0, invuln: 0 };
+  const player = { x: W/2, y: H - 60, w: 34, h: 30, cool: 0, invuln: 0 };
   let bullets = [];      // player shots
-  let enemyBullets = []; // hawk shots
+  let enemyBullets = []; // alien shots
   let enemies = [];
   let particles = [];
   let stars = [];
@@ -169,7 +157,7 @@
     const left = formationLeft();
     for (let r = 0; r < ROWS; r++) {
       for (let c = 0; c < COLS; c++) {
-        // Top rows are tougher hawks.
+        // Top rows are tougher aliens.
         const tier = r === 0 ? 2 : (r === 1 ? 1 : 0);
         enemies.push({
           col: c, row: r,
@@ -184,7 +172,7 @@
           diveT: 0,
           path: null,
           fireCD: 1 + Math.random() * 3,
-          wing: Math.random() * Math.PI * 2
+          anim: Math.random() * Math.PI * 2
         });
       }
     }
@@ -217,13 +205,12 @@
   }
   function addScore(n) {
     score += n;
-    if (score > high) { high = score; localStorage.setItem("quailGalagaHigh", high); }
+    if (score > high) { high = score; localStorage.setItem("starSquadronHigh", high); }
   }
 
   // ----- Update -----
   let last = performance.now();
   function update(dt) {
-    // Stars always drift
     for (const s of stars) {
       s.y += s.v * dt;
       if (s.y > H) { s.y = 0; s.x = Math.random() * W; }
@@ -244,7 +231,7 @@
     if (player.invuln > 0) player.invuln -= dt * 60;
     const wantFire = keys[" "] || firePressed;
     if (wantFire && player.cool <= 0) {
-      bullets.push({ x: player.x, y: player.y - 16, w: 5, h: 14, vy: -560 });
+      bullets.push({ x: player.x, y: player.y - 18, w: 4, h: 14, vy: -560 });
       player.cool = 0.28;
       Sound.shoot();
     }
@@ -260,9 +247,8 @@
 
     // --- Enemies ---
     const left = formationLeft();
-    let anyDiving = false;
     for (const e of enemies) {
-      e.wing += dt * 10;
+      e.anim += dt * 6;
       e.homeX = left + e.col * CELL_W;
       e.homeY = FORM_TOP + e.row * CELL_H;
 
@@ -275,23 +261,19 @@
         e.t += dt;
         e.x = e.homeX + formSwing;
         e.y = e.homeY + Math.sin(e.t * 2 + e.col) * 3;
-        // Occasionally shoot straight down
         e.fireCD -= dt;
         if (e.fireCD <= 0 && Math.random() < 0.5) {
           enemyBullets.push({ x: e.x, y: e.y + 14, w: 5, h: 12, vy: 240 });
           e.fireCD = 2 + Math.random() * 4;
         }
       } else if (e.state === "dive") {
-        anyDiving = true;
         e.diveT += dt;
-        // Swooping bezier-ish dive toward player, then loop back up off-screen
         const p = e.path;
         const tt = Math.min(1, e.diveT / p.dur);
         const ease = tt;
         const mx = p.sx + (p.ex - p.sx) * ease + Math.sin(ease * Math.PI * p.loops) * p.amp;
         const my = p.sy + (p.ey - p.sy) * ease;
         e.x = mx; e.y = my;
-        // fire while diving
         e.fireCD -= dt;
         if (e.fireCD <= 0) {
           const dx = player.x - e.x, dy = player.y - e.y;
@@ -300,14 +282,13 @@
           e.fireCD = 0.6 + Math.random();
         }
         if (tt >= 1) {
-          // returned; snap back to formation from the top
           e.y = -30; e.x = e.homeX + formSwing;
           e.state = "enter";
         }
       }
     }
 
-    // Trigger dives: pick idle formation enemies at random, more often on higher waves
+    // Trigger dives
     const diveChance = (0.25 + wave * 0.06) * dt;
     const divingCount = enemies.filter(e => e.state === "dive").length;
     const maxDivers = Math.min(1 + Math.floor(wave / 2), 4);
@@ -335,10 +316,10 @@
     for (const b of bullets) {
       for (const e of enemies) {
         if (e.hp > 0 && rectHit(b, { x: e.x, y: e.y, w: 30, h: 26 })) {
-          b.y = -999; // consume
+          b.y = -999;
           e.hp--;
           Sound.hit();
-          boom(e.x, e.y, e.tier === 2 ? "#ff6b6b" : e.tier === 1 ? "#ffd36b" : "#9be36b", 6);
+          boom(e.x, e.y, e.tier === 2 ? "#ff6b6b" : e.tier === 1 ? "#c77bff" : "#5ad1ff", 6);
           if (e.hp <= 0) {
             const pts = (e.tier + 1) * 50 * (e.state === "dive" ? 2 : 1);
             addScore(pts);
@@ -365,9 +346,7 @@
         enemyBullets = enemyBullets.filter(b => b !== hitBy);
         player.invuln = 120;
         player.x = W/2;
-        if (lives <= 0) {
-          state = "over";
-        }
+        if (lives <= 0) state = "over";
       }
     }
 
@@ -398,60 +377,63 @@
     ctx.globalAlpha = 1;
   }
 
-  // Player = a little quail gunship
-  function drawQuail(x, y, blink) {
+  // Player = a fighter ship
+  function drawShip(x, y, blink) {
     if (blink) return;
     ctx.save();
     ctx.translate(x, y);
-    // body
-    ctx.fillStyle = "#d9a566";
-    ctx.beginPath(); ctx.ellipse(0, 4, 15, 11, 0, 0, Math.PI*2); ctx.fill();
-    // belly
-    ctx.fillStyle = "#f2dcb0";
-    ctx.beginPath(); ctx.ellipse(0, 8, 10, 6, 0, 0, Math.PI*2); ctx.fill();
-    // head
-    ctx.fillStyle = "#b9793f";
-    ctx.beginPath(); ctx.arc(0, -8, 8, 0, Math.PI*2); ctx.fill();
-    // topknot (quail plume)
-    ctx.strokeStyle = "#2b1d12"; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(0, -15); ctx.quadraticCurveTo(6, -22, 2, -26); ctx.stroke();
-    // beak
-    ctx.fillStyle = "#f4b23e";
-    ctx.beginPath(); ctx.moveTo(0, -10); ctx.lineTo(-6, -6); ctx.lineTo(0, -4); ctx.fill();
-    // eye
-    ctx.fillStyle = "#1a120a";
-    ctx.beginPath(); ctx.arc(3, -9, 1.6, 0, Math.PI*2); ctx.fill();
-    // little thruster
+    // engine flames
+    ctx.fillStyle = "#ffb14a";
+    ctx.beginPath(); ctx.moveTo(-6, 12); ctx.lineTo(0, 18 + Math.random()*6); ctx.lineTo(6, 12); ctx.fill();
     ctx.fillStyle = "#7fd0ff";
-    ctx.fillRect(-4, 14, 8, 4 + Math.random()*4);
+    ctx.beginPath(); ctx.moveTo(-4, 12); ctx.lineTo(0, 16 + Math.random()*4); ctx.lineTo(4, 12); ctx.fill();
+    // hull
+    ctx.fillStyle = "#e8eef8";
+    ctx.beginPath();
+    ctx.moveTo(0, -16);           // nose
+    ctx.lineTo(6, 2);
+    ctx.lineTo(16, 12);           // right wingtip
+    ctx.lineTo(5, 10);
+    ctx.lineTo(0, 14);
+    ctx.lineTo(-5, 10);
+    ctx.lineTo(-16, 12);          // left wingtip
+    ctx.lineTo(-6, 2);
+    ctx.closePath(); ctx.fill();
+    // cockpit
+    ctx.fillStyle = "#3aa0ff";
+    ctx.beginPath(); ctx.ellipse(0, -4, 3.2, 6, 0, 0, Math.PI*2); ctx.fill();
+    // wing accents
+    ctx.fillStyle = "#9fb4d4";
+    ctx.fillRect(-14, 9, 5, 3);
+    ctx.fillRect(9, 9, 5, 3);
     ctx.restore();
   }
 
-  // Enemy = a hawk (flapping wings)
-  function drawHawk(e) {
-    const flap = Math.sin(e.wing) * 6;
-    const col = e.tier === 2 ? "#e15b5b" : e.tier === 1 ? "#e0a24a" : "#8a94a8";
-    const dark = e.tier === 2 ? "#8f2f2f" : e.tier === 1 ? "#8a5e1f" : "#4a5266";
+  // Enemy = alien fighter (animated legs/wings), colored by tier
+  function drawAlien(e) {
+    const wig = Math.sin(e.anim) * 3;
+    const body = e.tier === 2 ? "#ff6b6b" : e.tier === 1 ? "#c77bff" : "#5ad1ff";
+    const dark = e.tier === 2 ? "#a02f2f" : e.tier === 1 ? "#7b3fb0" : "#2f7fa0";
     ctx.save();
     ctx.translate(e.x, e.y);
-    if (e.state === "dive") ctx.rotate(Math.sin(e.diveT*6) * 0.15);
-    // wings
-    ctx.fillStyle = dark;
-    ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(-20, -4 - flap); ctx.lineTo(-14, 6); ctx.closePath(); ctx.fill();
-    ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(20, -4 - flap); ctx.lineTo(14, 6); ctx.closePath(); ctx.fill();
+    if (e.state === "dive") ctx.rotate(Math.PI); // dive nose-first toward player
+    // outer wings
+    ctx.strokeStyle = dark; ctx.lineWidth = 3; ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(-14, 6 + wig); ctx.lineTo(-8, -2); ctx.lineTo(-12, -8 - wig);
+    ctx.moveTo(14, 6 + wig); ctx.lineTo(8, -2); ctx.lineTo(12, -8 - wig);
+    ctx.stroke();
     // body
-    ctx.fillStyle = col;
-    ctx.beginPath(); ctx.ellipse(0, 2, 9, 11, 0, 0, Math.PI*2); ctx.fill();
-    // head
-    ctx.beginPath(); ctx.arc(0, -8, 6, 0, Math.PI*2); ctx.fill();
-    // beak (hooked, pointing down)
-    ctx.fillStyle = "#f4b23e";
-    ctx.beginPath(); ctx.moveTo(0, -4); ctx.lineTo(-3, 1); ctx.lineTo(3, 1); ctx.fill();
+    ctx.fillStyle = body;
+    ctx.beginPath(); ctx.ellipse(0, 0, 11, 9, 0, 0, Math.PI*2); ctx.fill();
+    // shell markings
+    ctx.fillStyle = dark;
+    ctx.beginPath(); ctx.moveTo(-6, -2); ctx.lineTo(0, -9); ctx.lineTo(6, -2); ctx.closePath(); ctx.fill();
     // eyes
-    ctx.fillStyle = "#fff";
-    ctx.beginPath(); ctx.arc(-2.5, -9, 1.6, 0, Math.PI*2); ctx.arc(2.5, -9, 1.6, 0, Math.PI*2); ctx.fill();
-    ctx.fillStyle = "#111";
-    ctx.beginPath(); ctx.arc(-2.5, -9, 0.8, 0, Math.PI*2); ctx.arc(2.5, -9, 0.8, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = "#fffbe0";
+    ctx.beginPath(); ctx.arc(-4, 1, 2.4, 0, Math.PI*2); ctx.arc(4, 1, 2.4, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = "#141018";
+    ctx.beginPath(); ctx.arc(-4, 1, 1.1, 0, Math.PI*2); ctx.arc(4, 1, 1.1, 0, Math.PI*2); ctx.fill();
     ctx.restore();
   }
 
@@ -466,11 +448,10 @@
     ctx.textAlign = "right";
     ctx.fillStyle = "#eaf2ff";
     ctx.fillText("WAVE " + wave, W - 12, 24);
-    // lives as little quail icons
     for (let i = 0; i < lives; i++) {
       ctx.save();
-      ctx.translate(24 + i * 26, H - 20); ctx.scale(0.6, 0.6);
-      drawQuail(0, 0, false);
+      ctx.translate(22 + i * 26, H - 18); ctx.scale(0.7, 0.7);
+      drawShip(0, 0, false);
       ctx.restore();
     }
   }
@@ -494,10 +475,10 @@
 
     if (state === "title") {
       centerText([
-        { t: "QUAIL", big: true, color: "#ffd36b" },
-        { t: "GALAGA", big: true, color: "#7fd0ff" },
+        { t: "STAR", big: true, color: "#ffd36b" },
+        { t: "SQUADRON", big: true, color: "#7fd0ff" },
         { t: "", },
-        { t: "Defend the covey from diving hawks!", small: true, color: "#9fb0d6" },
+        { t: "Hold the line against the alien swarm.", small: true, color: "#9fb0d6" },
         { t: "", small: true },
         { t: "← →  MOVE      SPACE  FIRE", color: "#eaf2ff" },
         { t: "P  PAUSE   ·   touch: drag & tap", small: true, color: "#9fb0d6" },
@@ -505,12 +486,11 @@
         { t: "PRESS ANY KEY / TAP TO START", color: "#9be36b" },
         { t: high > 0 ? "HIGH SCORE  " + high : "", small: true, color: "#ffd36b" },
       ]);
-      drawQuail(W/2, H - 120, false);
+      drawShip(W/2, H - 120, false);
       return;
     }
 
-    // Play field
-    for (const e of enemies) drawHawk(e);
+    for (const e of enemies) drawAlien(e);
 
     ctx.fillStyle = "#ffe37a";
     for (const b of bullets) ctx.fillRect(b.x - b.w/2, b.y - b.h/2, b.w, b.h);
@@ -530,7 +510,7 @@
     }
     ctx.globalAlpha = 1;
 
-    if (state !== "over") drawQuail(player.x, player.y, player.invuln > 0 && ((player.invuln|0) % 12 < 6));
+    if (state !== "over") drawShip(player.x, player.y, player.invuln > 0 && ((player.invuln|0) % 12 < 6));
 
     drawHUD();
 
@@ -554,7 +534,7 @@
   function frame(now) {
     let dt = (now - last) / 1000;
     last = now;
-    if (dt > 0.05) dt = 0.05; // clamp after tab switch
+    if (dt > 0.05) dt = 0.05;
     update(dt);
     render();
     requestAnimationFrame(frame);
