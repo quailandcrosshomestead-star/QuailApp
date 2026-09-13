@@ -25,6 +25,7 @@ transmitter.
 | **2** | **DRV8833** dual H-bridge breakout | One drives the L+R thrusters, the second drives the vertical motor (one channel spare). |
 | **1** | TP4056 charger (with DW01A protection) | To recharge the salvaged 1S cell safely. |
 | **1 kit** | Dupont jumper wires | For connecting the DRV8833 boards and bench-testing. |
+| **2** | 100 kΩ resistors (¼ W) | Voltage divider for the battery readout on the phone. Any pack of assorted resistors covers this. |
 | **1–2** | 36" round foil balloon (+ helium) | The envelope. See lift math below. |
 | — | Solder + iron, USB cable to match the ESP32 | To assemble and flash. |
 

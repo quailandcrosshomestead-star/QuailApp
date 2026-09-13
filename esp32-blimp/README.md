@@ -40,6 +40,10 @@ altitude — balance your ballast so the blimp is very slightly heavy.
 Both sticks spring back to center when you lift your finger, so releasing =
 stop / hover.
 
+A **battery voltage** pill sits in the top bar. It turns amber below ~3.6 V and
+red below ~3.4 V — land and recharge when it goes red to avoid over-draining
+the 1S cell (and browning out the ESP32 mid-flight).
+
 ## Repository layout
 
 ```
@@ -99,6 +103,7 @@ correct.
 | Feels sluggish to respond | raise `SLEW_PER_UPDATE` | `blimp.ino` |
 | Coasts too far on release | raise `SLEW_PER_UPDATE` | `blimp.ino` |
 | Want a different hotspot name/password | edit `AP_SSID` / `AP_PASS` | `blimp.ino` |
+| Battery reading is off vs. a multimeter | tweak `BATT_CAL` (or `BATT_R1`/`R2`) | `blimp.ino` |
 
 ## Notes for Arduino-ESP32 core 2.x
 
