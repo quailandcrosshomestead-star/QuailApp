@@ -62,17 +62,6 @@ static const int      MOTOR_DEADSTART = 60;       // min duty a small motor turn
 static const int      SLEW_PER_UPDATE = 40;       // softer = gentler ramp
 static const uint32_t FAILSAFE_MS = 500;          // cut motors if link goes quiet
 
-// ----------------------- BATTERY SENSE -------------------------------
-// Read the 1S LiPo through a resistor divider on an ADC1 pin (ADC2 is
-// unusable while WiFi is on). Battery+ -> R1 -> BATT_PIN -> R2 -> GND.
-// With R1 = R2 = 100k, 4.2 V at the battery reads ~2.1 V at the pin.
-static const int    BATT_PIN     = 34;            // ADC1, input-only pin
-static const float  BATT_R1      = 100000.0;      // top resistor (to battery +)
-static const float  BATT_R2      = 100000.0;      // bottom resistor (to GND)
-static const float  BATT_CAL     = 1.00;          // fine-tune vs. a multimeter
-static const float  BATT_DIVIDER = (BATT_R1 + BATT_R2) / BATT_R2;  // = 2.0
-static const float  BATT_EMA     = 0.15;          // smoothing (0..1, lower = smoother)
-
 // ----------------------- STATE ---------------------------------------
 AsyncWebServer server(80);
 AsyncWebSocket ws("/ws");
@@ -82,7 +71,6 @@ volatile bool     inArmed = false;
 volatile uint32_t lastCmdMs = 0;
 
 int curLeft = 0, curRight = 0, curVert = 0;           // slew-limited duty
-float battVolts = 0.0;                                 // smoothed battery voltage
 
 // =====================================================================
 //  Control page (served to the phone). Two touch joysticks + ARM.
@@ -100,13 +88,8 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);
   touch-action:none;overscroll-behavior:none;}
 #top{position:fixed;top:0;left:0;right:0;height:58px;display:flex;align-items:center;
   justify-content:space-between;padding:0 16px;z-index:10;}
-#left-info{display:flex;align-items:center;gap:12px;}
 #status{font-size:14px;opacity:.85;}
 #status b{color:var(--ok);} #status.off b{color:var(--danger);}
-#batt{font-size:14px;font-weight:700;padding:5px 11px;border-radius:9px;
-  background:var(--pad);border:1px solid #2b3542;color:var(--fg);white-space:nowrap;}
-#batt.ok{color:var(--ok);} #batt.warn{color:#f59e0b;}
-#batt.crit{color:#fff;background:var(--danger);border-color:var(--danger);}
 #arm{border:0;border-radius:12px;padding:14px 26px;font-size:17px;font-weight:800;
   color:#fff;background:var(--ok);letter-spacing:.5px;}
 #arm.armed{background:var(--danger);}
@@ -119,10 +102,7 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);
 .label{position:absolute;bottom:16px;width:100%;text-align:center;font-size:12px;opacity:.45;}
 </style></head><body>
 <div id="top">
-  <div id="left-info">
-    <div id="status" class="off">status: <b>connecting…</b></div>
-    <div id="batt">–.–– V</div>
-  </div>
+  <div id="status" class="off">status: <b>connecting…</b></div>
   <button id="arm">ARM</button>
 </div>
 <div class="zone" id="left"><div class="label">throttle (up/down) &nbsp;·&nbsp; turn (left/right)</div></div>
@@ -130,12 +110,6 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);
 <script>
 var armed=false, fwd=0, yaw=0, vert=0;
 var arm=document.getElementById('arm'), st=document.getElementById('status');
-var bt=document.getElementById('batt');
-// 1S LiPo thresholds: land by ~3.5 V, critical by ~3.4 V.
-function showBatt(v){
-  bt.textContent=v.toFixed(2)+' V';
-  bt.className=(v>=3.6)?'ok':(v>=3.4)?'warn':'crit';
-}
 function setArm(a){armed=a;arm.classList.toggle('armed',a);arm.textContent=a?'DISARM':'ARM';}
 arm.addEventListener('click',function(){setArm(!armed);});
 
@@ -177,11 +151,8 @@ function connect(){
   ws=new WebSocket('ws://'+location.host+'/ws');
   ws.onopen =function(){st.className='';st.innerHTML='status: <b>connected</b>';};
   ws.onclose=function(){st.className='off';st.innerHTML='status: <b>reconnecting…</b>';
-    bt.className='';bt.textContent='–.–– V';setArm(false);setTimeout(connect,600);};
+    setArm(false);setTimeout(connect,600);};
   ws.onerror=function(){ws.close();};
-  ws.onmessage=function(ev){
-    if(typeof ev.data==='string'&&ev.data.charAt(0)==='v')showBatt(parseFloat(ev.data.slice(2)));
-  };
 }
 connect();
 setInterval(function(){
@@ -216,14 +187,6 @@ int slew(int cur, int target) {
   if (target > cur) return min(cur + SLEW_PER_UPDATE, target);
   if (target < cur) return max(cur - SLEW_PER_UPDATE, target);
   return cur;
-}
-
-// Read the battery through the divider and smooth it (EMA).
-void sampleBattery() {
-  float mv = analogReadMilliVolts(BATT_PIN);          // calibrated pin millivolts
-  float v = (mv / 1000.0) * BATT_DIVIDER * BATT_CAL;  // scale back to real voltage
-  if (battVolts <= 0.01) battVolts = v;               // seed on first read
-  else battVolts += BATT_EMA * (v - battVolts);
 }
 
 // =====================================================================
@@ -261,11 +224,6 @@ void setup() {
   const int pins[] = {LEFT_A, LEFT_B, RIGHT_A, RIGHT_B, VERT_A, VERT_B};
   for (int pin : pins) ledcAttach(pin, PWM_FREQ, PWM_RES);
 
-  // Battery ADC: 12-bit, full 0..~3.1 V input range on the sense pin.
-  analogReadResolution(12);
-  analogSetPinAttenuation(BATT_PIN, ADC_11db);
-  sampleBattery();
-
   // Bring up the WiFi hotspot.
   WiFi.mode(WIFI_AP);
   WiFi.softAP(AP_SSID, AP_PASS);
@@ -289,21 +247,8 @@ void setup() {
 void loop() {
   ws.cleanupClients();
 
-  uint32_t now = millis();
-
-  // Sample the battery a few times a second and push it to the phone once
-  // a second (as a "v:3.85" text frame the control page parses).
-  static uint32_t lastBattSample = 0, lastBattSend = 0;
-  if (now - lastBattSample >= 250) {
-    lastBattSample = now;
-    sampleBattery();
-  }
-  if (now - lastBattSend >= 1000) {
-    lastBattSend = now;
-    ws.textAll("v:" + String(battVolts, 2));
-  }
-
   static uint32_t lastUpdate = 0;
+  uint32_t now = millis();
   if (now - lastUpdate < 10) return;      // ~100 Hz control loop
   lastUpdate = now;
 

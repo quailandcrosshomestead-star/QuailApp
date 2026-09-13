@@ -36,29 +36,6 @@ defaults at the top of `blimp/blimp.ino`; change the code if you use other GPIOs
 | GND | Common ground | Same ground as everything else |
 | nSLEEP | ESP32 **GPIO13** | Share with DRV8833 #1, or tie to 3V3 |
 
-### Battery voltage sense (for the phone readout)
-
-A 1S LiPo reaches 4.2 V — above the ESP32's ~3.3 V ADC limit — so read it
-through a **two-resistor divider** that halves the voltage. Use two equal
-resistors (100 kΩ each works well and wastes almost no current).
-
-```
-   Battery +  ──[ R1 100kΩ ]──┬──[ R2 100kΩ ]── GND
-                              │
-                          GPIO34 (BATT_PIN, ADC1)
-```
-
-| Connection | Notes |
-|-----------|-------|
-| Battery **+** → R1 → sense node | R1 = 100 kΩ (top) |
-| sense node → **GPIO34** | ADC1 input-only pin; must be ADC1 (ADC2 is dead while WiFi runs) |
-| sense node → R2 → **GND** | R2 = 100 kΩ (bottom) |
-
-Tap R1 at the **raw battery +** (same node as the DRV8833 `VM`), before any
-boost/regulator, so you read true cell voltage. If your reading is a little off
-versus a multimeter, adjust `BATT_CAL` in `blimp.ino`. Using different resistor
-values? Set `BATT_R1` / `BATT_R2` to match.
-
 ### Power
 
 - **1S LiPo (3.7 V)** → both DRV8833 `VM` pins and the ESP32.
