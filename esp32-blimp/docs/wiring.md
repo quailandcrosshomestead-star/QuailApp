@@ -1,11 +1,12 @@
 # Wiring guide
 
-All pins below match the defaults in the sketches. If you use different GPIOs,
-update the `static const int` pin definitions at the top of the `.ino` files.
+There is only **one board to wire** now — the ESP32 on the blimp. Your phone is
+the controller, so there's no transmitter to build. All pins below match the
+defaults at the top of `blimp/blimp.ino`; change the code if you use other GPIOs.
 
 ---
 
-## Receiver (gondola) — ESP32 + 2× DRV8833
+## ESP32 + 2× DRV8833 + 3 motors
 
 ### DRV8833 #1 → Left & Right thrusters
 
@@ -35,7 +36,7 @@ update the `static const int` pin definitions at the top of the `.ino` files.
 | GND | Common ground | Same ground as everything else |
 | nSLEEP | ESP32 **GPIO13** | Share with DRV8833 #1, or tie to 3V3 |
 
-### Power (receiver)
+### Power
 
 - **1S LiPo (3.7 V)** → both DRV8833 `VM` pins and the ESP32.
 - Feed the ESP32 from the 1S cell into its **3V3 pin** (bypasses the onboard
@@ -43,39 +44,27 @@ update the `static const int` pin definitions at the top of the `.ino` files.
   converter to 5 V into `VIN`/`5V` for steadier operation as the cell drains.
 - **All grounds must be common:** ESP32 GND, both DRV8833 GNDs, battery −.
 
-> Notes: GPIO25/26/27/14/32/33 are all valid PWM outputs. GPIO13 is used for
-> `nSLEEP`. Avoid GPIO6–11 (flash) and GPIO34–39 (input-only) for motor pins.
-
----
-
-## Transmitter (handheld) — ESP32 + 2 joysticks + button
-
-> **Critical:** ESP-NOW uses the WiFi radio, which disables ADC2. The joystick
-> axes **must** use ADC1 pins: **32, 33, 34, 35, 36, 39**.
-
-| Joystick signal | ESP32 pin | Axis |
-|-----------------|-----------|------|
-| Left stick **VRy** | **GPIO34** | Forward / back |
-| Left stick **VRx** | **GPIO35** | Yaw (turn) |
-| Right stick **VRy** | **GPIO32** | Vertical up / down |
-| Both sticks **VCC** | **3V3** | — |
-| Both sticks **GND** | **GND** | — |
-| ARM button | **GPIO4** → other leg to **GND** | Toggle arm (uses internal pull-up) |
-
-- Right-stick VRx and the joystick push-switches are unused (free for trims or
-  extra features later).
-- Leave both sticks **centered** at power-up — the transmitter samples stick
-  center during boot.
+> GPIO25/26/27/14/32/33 are all valid PWM outputs; GPIO13 drives `nSLEEP`.
+> Avoid GPIO6–11 (flash) and GPIO34–39 (input-only) for motor pins. Because
+> there are no joysticks anymore, the ADC-pin restrictions no longer apply.
 
 ---
 
 ## First-power checklist
 
-1. **Props OFF.** Flash both boards.
-2. Power the receiver; its LED should **fast-blink** (no link yet).
-3. Power the transmitter; the receiver LED should switch to a **slow blink**
-   (linked, disarmed).
-4. Press **ARM** — transmitter LED goes solid, receiver LED goes solid.
-5. With props still off, verify each motor spins the right way for each stick.
-   Fix direction with the `*_REVERSE` (receiver) or `INV_*` (transmitter) flags.
-6. Disarm, fit props, balance the blimp to near-neutral buoyancy, then fly.
+1. **Props OFF.** Flash `blimp.ino`. The Serial Monitor (115200) prints the
+   hotspot name and `http://192.168.4.1`.
+2. On your phone, join WiFi **`Blimp-01`** (password `flyblimp`). Tap **stay
+   connected** if it warns there's no internet.
+3. Open a browser to **`http://192.168.4.1`** — you should see two joysticks
+   and an ARM button; the status reads *connected*.
+4. Press **ARM** (button turns red). With props still off, nudge each stick and
+   confirm each motor spins the correct way. Fix any with the `*_REVERSE`
+   flags in `blimp.ino`.
+5. **DISARM**, fit props, balance the blimp to near-neutral buoyancy (slightly
+   heavy), then fly.
+
+### Status LED (onboard, GPIO2)
+- **Fast blink** — no phone connected (failsafe, motors off)
+- **Slow blink** — phone connected but disarmed (safe)
+- **Solid** — armed, motors live
