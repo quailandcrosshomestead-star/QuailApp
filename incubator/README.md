@@ -100,7 +100,7 @@ wire the heater and the AC turner motor.
 - **Auto mode** (`autoMode = true`, the default): the board regulates
   everything.
   - **Heater** cycles with hysteresis around `tempSetpoint`
-    (default **37.5 °C / ~99.5 °F**).
+    (default **99.5 °F**).
   - **Mister** cycles with hysteresis around `humiditySetpoint`
     (default **50 %RH**).
   - **Fan** runs continuously for even, forced-air circulation.
@@ -113,13 +113,13 @@ wire the heater and the AC turner motor.
 - **Turn Now** (`turnNow`): triggers one immediate timed turn run in any mode.
 - **Reset Cycle** (`resetCycle`): restarts the incubation clock at day 1.
 - **Out of range** (`outOfRange`): set when temperature or humidity drifts more
-  than 1 °C / 10 %RH from target, or when the sensor read fails.
+  than 2 °F / 10 %RH from target, or when the sensor read fails.
 - **Fail-safe**: if the sensor read fails, the heater and mister are forced off
   and only the fan runs, so a bad sensor can never cook the eggs.
 
 Day counting uses the Cloud/RTC time, so it survives reboots as long as the
 board keeps its network time. Setpoints are clamped to safe ranges
-(temp 30–40 °C, humidity 20–90 %) whenever changed from the dashboard.
+(temp 86–104 °F, humidity 20–90 %) whenever changed from the dashboard.
 
 ### 3. Register the ESP32 in Arduino IoT Cloud
 

@@ -14,9 +14,9 @@
 
   Cloud variables (see thingProperties.h):
     String status;            (READ)  human-readable state summary
-    float  temperature;       (READ)  measured deg C
+    float  temperature;       (READ)  measured deg F
     float  humidity;          (READ)  measured %RH
-    float  tempSetpoint;      (RW)    target deg C
+    float  tempSetpoint;      (RW)    target deg F
     float  humiditySetpoint;  (RW)    target %RH
     int    incubationDay;     (READ)  current day, 1-based
     bool   autoMode;          (RW)    true = board regulates automatically
@@ -54,18 +54,18 @@
 // ----------------------------------------------------------------------------
 // Control tuning.
 // ----------------------------------------------------------------------------
-static const float DEFAULT_TEMP_SP      = 37.5;  // deg C (~99.5 F, forced air)
+static const float DEFAULT_TEMP_SP      = 99.5;  // deg F (forced-air incubator)
 static const float DEFAULT_HUM_SP       = 50.0;  // %RH, days 1..lockdown
 static const float LOCKDOWN_HUM_SP      = 65.0;  // %RH during lockdown
 
-static const float TEMP_HYST            = 0.25;  // deg C deadband around SP
+static const float TEMP_HYST            = 0.5;   // deg F deadband around SP
 static const float HUM_HYST             = 2.0;   // %RH deadband around SP
 
-static const float TEMP_ALARM_BAND      = 1.0;   // deg C from SP -> out of range
+static const float TEMP_ALARM_BAND      = 2.0;   // deg F from SP -> out of range
 static const float HUM_ALARM_BAND       = 10.0;  // %RH from SP -> out of range
 
 // Safe clamps for user-entered setpoints.
-static const float TEMP_SP_MIN = 30.0, TEMP_SP_MAX = 40.0;
+static const float TEMP_SP_MIN = 86.0, TEMP_SP_MAX = 104.0;  // deg F
 static const float HUM_SP_MIN  = 20.0, HUM_SP_MAX  = 90.0;
 
 static const int   TOTAL_DAYS           = 18;    // quail incubation length
@@ -172,7 +172,7 @@ void loop() {
 // Sensing.
 // ----------------------------------------------------------------------------
 void readSensors() {
-  float t = dht.readTemperature(); // Celsius
+  float t = dht.readTemperature(true); // true = Fahrenheit
   float h = dht.readHumidity();
   if (isnan(t) || isnan(h)) {
     sensorValid = false;           // keep the last good values on the dashboard
@@ -291,7 +291,7 @@ void updateStatus() {
     if (isLockdown()) s += " (Lockdown)";
     s += " | ";
     s += String(temperature, 1);
-    s += "C ";
+    s += "F ";
     s += String(humidity, 0);
     s += "%";
     if (heater) s += " | Heat";

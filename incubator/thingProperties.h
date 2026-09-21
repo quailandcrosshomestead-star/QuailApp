@@ -33,9 +33,9 @@ void onResetCycleChange();
 // READ variables are reported by the board; READWRITE variables can also be
 // set from the dashboard and fire the matching callback above.
 String status;            // Human-readable summary shown on the dashboard
-float  temperature;       // Measured temperature (deg C)
+float  temperature;       // Measured temperature (deg F)
 float  humidity;          // Measured relative humidity (%)
-float  tempSetpoint;      // Target temperature (deg C)
+float  tempSetpoint;      // Target temperature (deg F)
 float  humiditySetpoint;  // Target relative humidity (%)
 int    incubationDay;     // Current day of the incubation cycle (1-based)
 bool   autoMode;          // true = board regulates automatically
