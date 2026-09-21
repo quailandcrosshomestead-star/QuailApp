@@ -61,10 +61,9 @@ Most low-cost relay boards are **active-low**; the sketch assumes this via
     (default **50 %RH**).
   - **Fan** runs continuously for even, forced-air circulation.
   - **Turner** runs on an interval — the motor is powered for a set run-time
-    (default **4 min**, tune `TURN_RUN_MS`) every **4 h** (`TURN_INTERVAL_S`),
-    long enough to guarantee a full side-to-side traverse — and **stops at
-    lockdown (day 15)**. At lockdown the humidity target is automatically raised
-    to **65 %RH**.
+    (default **12 s**, tune `TURN_RUN_MS`) every **3 h** (`TURN_INTERVAL_S`) —
+    and **stops at lockdown (day 15)**. At lockdown the humidity target is
+    automatically raised to **65 %RH**.
 - **Manual mode** (`autoMode = false`): the `heater`, `mister`, `fan` and
   `turner` dashboard toggles drive their relays directly.
 - **Turn Now** (`turnNow`): triggers one immediate timed turn run in any mode.

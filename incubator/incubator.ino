@@ -68,12 +68,11 @@ static const int   TOTAL_DAYS           = 18;    // quail incubation length
 static const int   LOCKDOWN_DAY         = 15;    // stop turning from this day
 
 static const unsigned long SENSOR_INTERVAL_MS = 5000UL;          // 5 s
-static const unsigned long TURN_INTERVAL_S    = 4UL * 3600UL;    // start a turn every 4 h
+static const unsigned long TURN_INTERVAL_S    = 3UL * 3600UL;    // start a turn every 3 h
 // Egg-turner motor is a continuous-rotation AC gear motor (e.g. TY-50AF,
-// ~2.5-3 rpm, auto-reverses at the tray end-stops). Each "turn" simply powers
-// it long enough to guarantee a full side-to-side traverse; over-running just
-// rocks harmlessly, so a generous default is safe. Shorten to match your tray.
-static const unsigned long TURN_RUN_MS        = 4UL * 60UL * 1000UL; // run 4 min per turn
+// ~2.5-3 rpm, auto-reverses at the tray end-stops). Each "turn" powers it for a
+// fixed run-time; adjust to match how far your tray travels per turn.
+static const unsigned long TURN_RUN_MS        = 12UL * 1000UL;   // run 12 s per turn
 
 // Epoch values below this (2020-01-01) mean the RTC has not synced yet.
 static const unsigned long MIN_VALID_EPOCH = 1577836800UL;
