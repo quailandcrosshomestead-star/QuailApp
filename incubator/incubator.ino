@@ -68,8 +68,12 @@ static const int   TOTAL_DAYS           = 18;    // quail incubation length
 static const int   LOCKDOWN_DAY         = 15;    // stop turning from this day
 
 static const unsigned long SENSOR_INTERVAL_MS = 5000UL;          // 5 s
-static const unsigned long TURN_INTERVAL_S    = 4UL * 3600UL;    // every 4 h
-static const unsigned long TURN_PULSE_MS      = 12000UL;         // 12 s per turn
+static const unsigned long TURN_INTERVAL_S    = 4UL * 3600UL;    // start a turn every 4 h
+// Egg-turner motor is a continuous-rotation AC gear motor (e.g. TY-50AF,
+// ~2.5-3 rpm, auto-reverses at the tray end-stops). Each "turn" simply powers
+// it long enough to guarantee a full side-to-side traverse; over-running just
+// rocks harmlessly, so a generous default is safe. Shorten to match your tray.
+static const unsigned long TURN_RUN_MS        = 4UL * 60UL * 1000UL; // run 4 min per turn
 
 // Epoch values below this (2020-01-01) mean the RTC has not synced yet.
 static const unsigned long MIN_VALID_EPOCH = 1577836800UL;
@@ -82,7 +86,7 @@ DHT dht(DHT_PIN, DHT_TYPE);
 bool          sensorValid       = false;   // last read succeeded?
 unsigned long lastSensorReadMs  = 0;
 
-bool          turning           = false;   // a turn pulse is in progress
+bool          turning           = false;   // a timed turn run is in progress
 unsigned long turnStartMs       = 0;
 unsigned long lastTurnEpoch     = 0;       // epoch of the last completed turn
 unsigned long cycleStartEpoch   = 0;       // epoch when the cycle began
@@ -157,7 +161,7 @@ void loop() {
     updateStatus();
   }
 
-  // A turn pulse is time-critical, so service it every loop.
+  // A timed turn run must end on time, so service it every loop.
   serviceTurn(nowMs);
 }
 
@@ -240,9 +244,9 @@ void startTurn() {
   if (now >= MIN_VALID_EPOCH) lastTurnEpoch = now;
 }
 
-// Ends the turn pulse after TURN_PULSE_MS and clears the momentary trigger.
+// Ends the timed turn run after TURN_RUN_MS and clears the momentary trigger.
 void serviceTurn(unsigned long nowMs) {
-  if (turning && (nowMs - turnStartMs >= TURN_PULSE_MS)) {
+  if (turning && (nowMs - turnStartMs >= TURN_RUN_MS)) {
     turning = false;
     turner  = false;
     writeRelay(PIN_TURNER, false);
@@ -307,7 +311,7 @@ void onMisterChange() { if (!autoMode) writeRelay(PIN_MISTER, mister); }
 void onFanChange()    { if (!autoMode) writeRelay(PIN_FAN,    fan);    }
 
 void onTurnerChange() {
-  // Manual continuous control of the turner relay (auto uses timed pulses).
+  // Manual continuous control of the turner relay (auto uses timed runs).
   if (!autoMode && !turning) writeRelay(PIN_TURNER, turner);
 }
 

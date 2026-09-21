@@ -22,6 +22,22 @@ Cloud dashboard. It shares the incubation timeline with the companion
 - A 4-channel relay board for: heater, mister/humidifier, circulation fan,
   egg-turner motor
 
+### Egg-turner motor (mains AC)
+
+This build uses a **TY-50AF synchronous gear motor** — **AC 110–120 V**,
+50/60 Hz, ≤4 W, ~2.5–3 rpm, bidirectional. It is a continuous-rotation turner:
+the motor drives the tray until a mechanical end-stop, then auto-reverses (or a
+cam carries it around), so **direction is handled by the mechanism, not the
+Arduino** (it is a 2-wire motor). The controller only switches its line power
+on/off.
+
+> ⚠️ **Mains safety.** The turner relay switches **110–120 V AC**. Use a relay
+> module rated for mains (≥250 VAC, e.g. 10 A), switch the motor's **line**
+> conductor through it, and keep all mains wiring fully isolated and insulated
+> from the Arduino's low-voltage side. The Arduino provides only a dry contact
+> and never touches mains voltage. If you are not comfortable wiring mains,
+> get someone qualified to do it.
+
 ### Default pin map (edit at the top of `incubator.ino`)
 
 | Signal | Pin |
@@ -44,12 +60,14 @@ Most low-cost relay boards are **active-low**; the sketch assumes this via
   - **Mister** cycles with hysteresis around `humiditySetpoint`
     (default **50 %RH**).
   - **Fan** runs continuously for even, forced-air circulation.
-  - **Turner** pulses every 4 hours (12 s per pulse), and **stops at lockdown
-    (day 15)**. At lockdown the humidity target is automatically raised to
-    **65 %RH**.
+  - **Turner** runs on an interval — the motor is powered for a set run-time
+    (default **4 min**, tune `TURN_RUN_MS`) every **4 h** (`TURN_INTERVAL_S`),
+    long enough to guarantee a full side-to-side traverse — and **stops at
+    lockdown (day 15)**. At lockdown the humidity target is automatically raised
+    to **65 %RH**.
 - **Manual mode** (`autoMode = false`): the `heater`, `mister`, `fan` and
   `turner` dashboard toggles drive their relays directly.
-- **Turn Now** (`turnNow`): triggers one immediate turn pulse in any mode.
+- **Turn Now** (`turnNow`): triggers one immediate timed turn run in any mode.
 - **Reset Cycle** (`resetCycle`): restarts the incubation clock at day 1.
 - **Out of range** (`outOfRange`): set when temperature or humidity drifts more
   than 1 °C / 10 %RH from target, or when the sensor read fails.
