@@ -33,19 +33,23 @@
 #include <DHT.h>
 
 // ----------------------------------------------------------------------------
-// Hardware configuration -- adjust to match your wiring.
+// Hardware configuration -- ESP32-WROOM 4-channel relay board (onboard AC/DC
+// supply). Relay channel -> ESP32 GPIO uses the common mapping for this board.
+// VERIFY with the blink/polarity test in the README before trusting it.
+//   CH1 = GPIO32   CH2 = GPIO33   CH3 = GPIO25   CH4 = GPIO26
 // ----------------------------------------------------------------------------
-#define DHT_PIN         2      // Data pin of the DHT22 sensor
+#define PIN_HEATER      32     // Relay CH1: heat source (bulb / ceramic / mat)
+#define PIN_MISTER      33     // Relay CH2: humidifier / mister
+#define PIN_FAN         25     // Relay CH3: circulation fan
+#define PIN_TURNER      26     // Relay CH4: egg-turner motor (AC mains, see README)
+
+#define DHT_PIN         4      // DHT22 data -- any free GPIO broken out on the header
 #define DHT_TYPE        DHT22  // DHT22 (AM2302) / DHT11 / DHT21
 
-#define PIN_HEATER      3      // Relay: heat source (bulb / ceramic / mat)
-#define PIN_MISTER      4      // Relay: humidifier / mister
-#define PIN_FAN         5      // Relay: circulation fan
-#define PIN_TURNER      6      // Relay: egg-turner motor
-
-// Most low-cost relay boards are ACTIVE-LOW (LOW = energised). Set to false if
-// your relays energise on a HIGH signal.
-#define RELAY_ACTIVE_LOW  true
+// This ESP32 relay board is driven ACTIVE-HIGH (GPIO HIGH = relay energised).
+// !! VERIFY before wiring the heater (see README) -- a wrong value means the
+//    heater could be ON at boot. Set to true if your board is active-low.
+#define RELAY_ACTIVE_LOW  false
 
 // ----------------------------------------------------------------------------
 // Control tuning.

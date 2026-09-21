@@ -9,8 +9,14 @@
 #include <Arduino_ConnectionHandler.h>
 #include "arduino_secrets.h"
 
-const char SSID[] = SECRET_SSID;         // Network SSID (name)
-const char PASS[] = SECRET_OPTIONAL_PASS; // Network password (WPA) or key (WEP)
+// ESP32 is a "manually configured" device in Arduino IoT Cloud: when you add
+// the device you receive a Device ID (login name) and a Secret Key. Paste the
+// Device ID below and put the Secret Key in arduino_secrets.h.
+const char DEVICE_LOGIN_NAME[] = "PASTE-YOUR-DEVICE-ID-HERE";
+
+const char SSID[]       = SECRET_SSID;          // Network SSID (name)
+const char PASS[]       = SECRET_OPTIONAL_PASS;  // Network password (WPA/WEP)
+const char DEVICE_KEY[] = SECRET_DEVICE_KEY;     // Secret device password
 
 // ---- Cloud change callbacks (implemented in incubator.ino) ----
 void onHeaterChange();
@@ -42,6 +48,10 @@ bool   resetCycle;        // Momentary: restart the incubation cycle at day 1
 bool   outOfRange;        // true when temp/humidity are outside the safe band
 
 void initProperties() {
+  // Required for a manually-configured ESP32 device.
+  ArduinoCloud.setBoardId(DEVICE_LOGIN_NAME);
+  ArduinoCloud.setSecretDeviceKey(DEVICE_KEY);
+
   ArduinoCloud.addProperty(status,           READ,      ON_CHANGE,  NULL);
   ArduinoCloud.addProperty(temperature,      READ,      10 * SECONDS, NULL);
   ArduinoCloud.addProperty(humidity,         READ,      10 * SECONDS, NULL);
